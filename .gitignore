@@ -29,6 +29,8 @@ mlruns/
 artifacts/models/
 artifacts/mlflow.db
 reports/
+pdf/
+*.pdf
 
 # IDE & OS
 .vscode/
