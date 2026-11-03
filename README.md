@@ -1,5 +1,7 @@
 # DriftWatch
 
+> A production ML monitoring platform for demand forecasting that separates statistical input drift from actual performance degradation.
+
 DriftWatch monitors tabular ML models in production, specifically retail demand forecasters. Most monitoring setups alert whenever an input feature shifts, which produces alert fatigue when the model handles the shift fine. DriftWatch separates statistical shift from performance degradation. Input and prediction shifts can raise warnings at most; critical alerts and retraining triggers require verified accuracy decay on delayed ground-truth labels.
 
 ---
@@ -79,6 +81,17 @@ make typecheck  # mypy src/driftwatch
 make ui         # Streamlit dashboard on http://localhost:8501
 make api        # FastAPI server on http://localhost:8000
 ```
+
+---
+
+## Skills Demonstrated
+
+- **Statistical testing**: Two-sample Kolmogorov-Smirnov, Population Stability Index (PSI with reference quantile binning and Laplace smoothing), Jensen-Shannon divergence, normalized Wasserstein-1 distance, Benjamini-Hochberg FDR, and Bonferroni adjustments.
+- **Time series and forecasting**: Leak-free temporal feature pipelines (lags, rolling statistics with 1-period shifts, calendar features), seasonal-naive baselines, XGBoost demand forecasters with early stopping, MASE, WAPE, and WRMSSE evaluation.
+- **MLOps and production serving**: FastAPI serving gateway with request correlation IDs and idempotent deduplication, delayed ground-truth matching with maturity tracking, stationary block bootstrap 95% confidence intervals on autocorrelated time series errors.
+- **Model governance and retraining**: Retraining trigger policies (rejecting drift-only triggers), paired Wilcoxon signed-rank comparison between champion and challenger on holdout splits, MLflow 3.x tracking and artifact registry, decoupled audited promotion and rollback.
+- **Uncertainty quantification**: Inductive split conformal prediction intervals with empirical coverage auditing, domain classifier AUC drift attribution, data contract schema validation with quarantine routing.
+- **Monitoring UI**: Interactive 7-page Streamlit console querying relational databases (PostgreSQL and SQLite) directly with zero mocked metrics.
 
 ---
 
