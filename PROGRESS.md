@@ -209,6 +209,40 @@
 
 ---
 
+## Milestone 7: Governance Hardening, Policy Enforcement & Statistical Rigor
+- **Status**: DONE
+- **Date**: 2026-11-03
+- **Review Items Resolved & Architectural Hardening**:
+  1. **Retraining Policy Enforced (`src/driftwatch/retraining/pipeline.py`)**:
+     - `execute_retraining()` evaluates `evaluate_retraining_trigger()`. Rejects `DRIFT_ONLY` retraining with `PolicyViolationError` and records `REJECTED` status in DB. Requires verified performance window reports for `SUSTAINED_DEGRADATION`.
+     - Added walk-forward rolling-origin CV evaluation over `rolling_origin_splits()`.
+  2. **Promotion Gating Enforced at Service Layer (`src/driftwatch/api/service.py`)**:
+     - `promote_model_version()` verifies that candidate belongs to the model, an authorized operator/actor is provided, a `ModelEvaluationModel` record exists with `decision == "APPROVED"`, and the model artifact exists on disk and loads successfully before modifying database state.
+     - Rejected or unevaluated candidates strictly raise `ValueError` on attempted promotion.
+     - `rollback_champion()` verifies prior model artifact exists and loads, switching active champion atomically with an audit log.
+     - Eliminated silent inference fallback in `predict_single()`, raising `RuntimeError` when forecaster is unavailable.
+  3. **Dual-Gating Statistical Loophole Fixed (`src/driftwatch/drift/multiple_testing.py`)**:
+     - When `p_value is None` (e.g. for PSI, JS divergence, Wasserstein distance), the dual-gate no longer assumes statistical significance. These metrics are strictly classified and handled as heuristic effect-size threshold detectors.
+  4. **Evidently Agreement Cross-Check Grounded (`monitoring/benchmark/run_benchmark.py`)**:
+     - Extracted genuine per-feature drift decisions from Evidently 0.7+ `snapshot.metric_results` (`ValueDrift` p-values against threshold), comparing directly with DriftWatch's decisions to compute actual agreement rate.
+     - Benchmark False Positive Rate evaluated on stationary null distribution ($H_0$ true), yielding nominal $\approx 1.67\%$ raw FPR, $0.00\%$ BH/Bonferroni FPR, and $2.92\%$ dual-gating FPR.
+  5. **Unbiased Performance Coverage Denominator (`src/driftwatch/monitoring/performance.py`, `scripts/run_demo.py`)**:
+     - Queried prediction logs with left outer join on ground-truth labels so unmatched operational predictions remain in the monitoring window.
+     - Coverage ratio is computed against the full window prediction count (`total_window_predictions`).
+  6. **Stationary Bootstrap Implemented (`src/driftwatch/monitoring/performance.py`)**:
+     - Implemented Politis & Romano (1994) Stationary Bootstrap with geometric block lengths ($p = 1/L$) and circular modulo index wrapping.
+     - Enforced $n \ge 15$ minimum sample size requirement for empirical validity.
+  7. **Feature Pipeline Artifact Serialization (`src/driftwatch/features/pipeline.py`, `src/driftwatch/retraining/registry.py`)**:
+     - Added `save()` and `load()` to `DemandFeaturePipeline` using `joblib`.
+     - Model retraining persists both model JSON and fitted pipeline alongside MLflow run artifacts.
+- **Evidence (Test & Benchmark Verification)**:
+  - **Full Pytest Suite**: 46 passed in 26.14s (`tests/test_governance.py` 4/4 passed).
+  - **Ruff Linter**: 0 errors across `src/`, `tests/`, `scripts/`, `monitoring/`.
+  - **Mypy Type Check**: 0 issues across 57 source files.
+  - **Demo Execution**: `python scripts/run_demo.py` completed all 10 steps in 45.34s (CPU-only).
+
+---
+
 ## Section 7 Final Acceptance Sign-off Matrix
 
 | Criterion | Requirement from Brief | Implementation & Evidence | Verified Status |

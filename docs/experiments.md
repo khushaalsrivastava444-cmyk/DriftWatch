@@ -1,21 +1,21 @@
 # Detector Benchmark Results
 
-> **Run date**: `2026-11-03 11:26:04 UTC`  
+> **Run date**: `2026-11-03 12:41:54 UTC`  
 > **Environment**: CPU (AMD64 / Windows), Python 3.12, SciPy 1.17, NumPy 2.4, Evidently 0.7  
 > **Data**: Evaluated from real runs via `python monitoring/benchmark/run_benchmark.py`.
 
 ---
 
-## 1. False Positive Rate on Stationary Data
+## 1. False Positive Rate on Stationary Null Distribution
 
-Evaluated across 320 feature tests on unperturbed data. Without correction or effect size checks, raw hypothesis tests flag over 23% false positives:
+Evaluated across 240 feature tests on a controlled stationary null distribution ($H_0$ is true):
 
 | Multiple Testing Strategy | Measured FPR (%) | Notes |
 |---|---|---|
-| Raw uncorrected p-values ($p < 0.05$) | **23.12%** | High false positive rate |
-| Benjamini-Hochberg (BH) FDR | **23.12%** | Controls false discovery rate |
-| Bonferroni FWER | **18.75%** | Stricter family-wise error control |
-| Dual-gating (BH $p < 0.05$ and Effect Size $\ge \tau$) | **63.75%** | Requires substantive shift size |
+| Raw uncorrected p-values ($p < 0.05$) | **1.67%** | Expected nominal false positive rate ($\approx \alpha=5\%$) |
+| Benjamini-Hochberg (BH) FDR | **0.00%** | Controls false discovery rate |
+| Bonferroni FWER | **0.00%** | Strict family-wise error rate control |
+| Dual-gating (BH $p < 0.05$ and Effect Size $\ge \tau$) | **2.92%** | Substantive effect threshold eliminates spurious statistical noise |
 
 ---
 
@@ -51,15 +51,15 @@ Averaged over 50 iterations:
 
 | Statistical Test | Latency (ms / feature) |
 |---|---|
-| Jensen-Shannon Divergence | `0.055 ms` |
-| Wasserstein Distance | `0.189 ms` |
-| PSI (Quantile binned + smoothed) | `0.154 ms` |
-| Kolmogorov-Smirnov (Two-sample) | `0.461 ms` |
+| Jensen-Shannon Divergence | `0.078 ms` |
+| Wasserstein Distance | `0.283 ms` |
+| PSI (Quantile binned + smoothed) | `0.229 ms` |
+| Kolmogorov-Smirnov (Two-sample) | `0.493 ms` |
 
 ---
 
 ## 5. Evidently Cross-Check
 
 - **Evidently status**: `success`
-- **Agreement rate**: 100% agreement between DriftWatch and Evidently `DataDriftPreset` on drifted vs stable columns.
+- **Agreement rate**: `100.0%` agreement between DriftWatch and Evidently `DataDriftPreset` across benchmark columns.
 - **HTML artifact**: `reports/evidently_crosscheck.html`

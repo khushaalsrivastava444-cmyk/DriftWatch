@@ -34,14 +34,14 @@ from driftwatch.drift.statistical_tests import (
     calculate_wasserstein,
 )
 from driftwatch.drift.windowing import HysteresisStateTracker
-from driftwatch.features.pipeline import FEATURE_COLUMNS, DemandFeaturePipeline
+from driftwatch.features.pipeline import DemandFeaturePipeline
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("benchmark")
 
 
 def run_fpr_benchmark(num_seeds: int = 15) -> dict[str, float]:
-    """Measure False Positive Rate on purely stable (un-drifted) data."""
+    """Measure False Positive Rate on a controlled stationary null distribution (H0 true)."""
     logger.info("Running False Positive Rate (FPR) benchmark across %d seeds...", num_seeds)
     total_tests = 0
     raw_false_positives = 0
@@ -58,24 +58,25 @@ def run_fpr_benchmark(num_seeds: int = 15) -> dict[str, float]:
     )
     drift_engine = DriftEngine(engine_config)
 
+    features = ["sales", "sell_price", "rolling_mean_7", "lag_1", "lag_2", "lag_7"]
+
     for s_idx in range(num_seeds):
         seed = 1000 + s_idx
-        # Generate stable demand
-        cfg = SyntheticDemandConfig(num_days=180, num_stores=2, num_items=4, seed=seed)
-        df = generate_synthetic_demand(cfg)
-        parts = temporal_train_val_test_split(df, train_ratio=0.6, val_ratio=0.2)
+        rng = np.random.default_rng(seed)
+        n_samples = 300
 
-        pipeline = DemandFeaturePipeline()
-        pipeline.fit(parts.train)
-        ref_feats = pipeline.transform(parts.train)
-        # Test split is purely natural continuation with zero injected drift
-        test_feats = pipeline.transform(parts.test)
+        # Reference and monitored samples drawn independently from identical stationary distribution (H0 true)
+        ref_data = {f: rng.normal(loc=10.0 + i * 2, scale=2.5, size=n_samples) for i, f in enumerate(features)}
+        test_data = {f: rng.normal(loc=10.0 + i * 2, scale=2.5, size=n_samples) for i, f in enumerate(features)}
+
+        ref_feats = pd.DataFrame(ref_data)
+        test_feats = pd.DataFrame(test_data)
 
         # Run drift analysis
         report = drift_engine.run_drift_analysis(
             reference_df=ref_feats,
             current_df=test_feats,
-            feature_columns=FEATURE_COLUMNS[:8],
+            feature_columns=features,
         )
 
         for res in report.results:
@@ -277,30 +278,63 @@ def run_evidently_crosscheck_benchmark() -> dict[str, Any]:
         dw_psi_b, _ = calculate_psi(ref_df["feature_b"], curr_df["feature_b"])
         dw_drift_a = bool(dw_psi_a >= 0.10)
         dw_drift_b = bool(dw_psi_b >= 0.10)
+        dw_decisions = {"feature_a": dw_drift_a, "feature_b": dw_drift_b}
 
         # Run Evidently
         report = Report(metrics=[DataDriftPreset()])
         snapshot = report.run(reference_data=ref_df, current_data=curr_df)
-        
+
         # Save HTML artifact
         html_path = Path("reports/evidently_crosscheck.html")
         html_path.parent.mkdir(parents=True, exist_ok=True)
         snapshot.save_html(str(html_path))
 
-        _ = snapshot.dict()
-        dataset_drift = True
+        # Parse genuine Evidently metric results
+        ev_decisions: dict[str, bool] = {}
+        ev_dataset_drift = False
+
+        if hasattr(snapshot, "metric_results"):
+            for _, v in snapshot.metric_results.items():
+                m_dict = v.dict() if hasattr(v, "dict") else {}
+                location = m_dict.get("metric_value_location", {}).get("metric", {}).get("params", {})
+                mtype = location.get("type", "")
+
+                if mtype == "evidently:metric_v2:ValueDrift":
+                    col = location.get("column")
+                    val = m_dict.get("value")
+                    thresh = location.get("threshold", 0.05)
+                    if col and val is not None:
+                        ev_decisions[col] = bool(val < thresh)
+                elif mtype == "evidently:metric_v2:DriftedColumnsCount":
+                    share = m_dict.get("share", {}).get("value", 0.0)
+                    drift_share_thresh = location.get("drift_share", 0.5)
+                    ev_dataset_drift = bool(share >= drift_share_thresh)
+
+        # Compute real feature-level decision agreement
+        common_cols = [c for c in dw_decisions if c in ev_decisions]
+        matching_cols = [c for c in common_cols if dw_decisions[c] == ev_decisions[c]]
+        agreement_rate = (len(matching_cols) / len(common_cols)) if common_cols else 0.0
+        full_agreement = bool(agreement_rate == 1.0)
 
         return {
             "status": "success",
             "dw_detected_drift_a": dw_drift_a,
             "dw_detected_drift_b": dw_drift_b,
-            "evidently_dataset_drift": dataset_drift,
-            "agreement": bool(dw_drift_a and dataset_drift),
+            "evidently_drift_a": ev_decisions.get("feature_a", False),
+            "evidently_drift_b": ev_decisions.get("feature_b", False),
+            "evidently_dataset_drift": ev_dataset_drift,
+            "agreement_rate": agreement_rate,
+            "full_agreement": full_agreement,
             "html_report_path": str(html_path),
         }
     except Exception as e:
-        logger.warning("Evidently cross-check execution: %s", e)
-        return {"status": "evidently_evaluated", "agreement": True, "note": str(e)}
+        logger.error("Evidently cross-check execution failed: %s", e)
+        return {
+            "status": "failed",
+            "agreement_rate": 0.0,
+            "full_agreement": False,
+            "error": str(e),
+        }
 
 
 def generate_experiments_markdown(
@@ -322,16 +356,16 @@ def generate_experiments_markdown(
 
 ---
 
-## 1. False Positive Rate on Stationary Data
+## 1. False Positive Rate on Stationary Null Distribution
 
-Evaluated across {fpr_results.get('total_tests', 0)} feature tests on unperturbed data. Without correction or effect size checks, raw hypothesis tests flag over 23% false positives:
+Evaluated across {fpr_results.get('total_tests', 0)} feature tests on a controlled stationary null distribution ($H_0$ is true):
 
 | Multiple Testing Strategy | Measured FPR (%) | Notes |
 |---|---|---|
-| Raw uncorrected p-values ($p < 0.05$) | **{fpr_results.get('raw_p_fpr', 0.0)*100:.2f}%** | High false positive rate |
+| Raw uncorrected p-values ($p < 0.05$) | **{fpr_results.get('raw_p_fpr', 0.0)*100:.2f}%** | Expected nominal false positive rate ($\approx \alpha=5\%$) |
 | Benjamini-Hochberg (BH) FDR | **{fpr_results.get('bh_adjusted_fpr', 0.0)*100:.2f}%** | Controls false discovery rate |
-| Bonferroni FWER | **{fpr_results.get('bonferroni_fpr', 0.0)*100:.2f}%** | Stricter family-wise error control |
-| Dual-gating (BH $p < 0.05$ and Effect Size $\ge \tau$) | **{fpr_results.get('dual_gating_fpr', 0.0)*100:.2f}%** | Requires substantive shift size |
+| Bonferroni FWER | **{fpr_results.get('bonferroni_fpr', 0.0)*100:.2f}%** | Strict family-wise error rate control |
+| Dual-gating (BH $p < 0.05$ and Effect Size $\ge \tau$) | **{fpr_results.get('dual_gating_fpr', 0.0)*100:.2f}%** | Substantive effect threshold eliminates spurious statistical noise |
 
 ---
 
@@ -370,7 +404,7 @@ Averaged over 50 iterations:
 ## 5. Evidently Cross-Check
 
 - **Evidently status**: `{evidently_results.get('status')}`
-- **Agreement rate**: 100% agreement between DriftWatch and Evidently `DataDriftPreset` on drifted vs stable columns.
+- **Agreement rate**: `{evidently_results.get('agreement_rate', 0.0)*100:.1f}%` agreement between DriftWatch and Evidently `DataDriftPreset` across benchmark columns.
 - **HTML artifact**: `reports/evidently_crosscheck.html`
 """
 

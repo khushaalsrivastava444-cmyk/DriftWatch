@@ -14,6 +14,7 @@ from driftwatch.alerts.notifiers import BaseNotifier, LogNotifier
 from driftwatch.db.models import AlertModel
 from driftwatch.drift.engine import DriftReport
 from driftwatch.drift.results import EvidenceClass
+from driftwatch.drift.windowing import HysteresisStateTracker
 from driftwatch.monitoring.performance import EvaluatedPerformanceWindow
 
 logger = logging.getLogger(__name__)
@@ -32,10 +33,20 @@ class AlertStatus(str, Enum):
 
 
 class AlertEngine:
-    """Evaluates drift and performance reports, enforcing strict evidence classifications."""
+    """Evaluates drift and performance reports, enforcing strict evidence classifications and hysteresis."""
 
-    def __init__(self, notifiers: list[BaseNotifier] | None = None) -> None:
+    def __init__(
+        self,
+        notifiers: list[BaseNotifier] | None = None,
+        k_hysteresis: int = 1,
+        n_hysteresis: int = 1,
+        hysteresis_margin: float = 0.03,
+    ) -> None:
         self.notifiers = notifiers if notifiers is not None else [LogNotifier()]
+        self.k_hysteresis = k_hysteresis
+        self.n_hysteresis = n_hysteresis
+        self.hysteresis_margin = hysteresis_margin
+        self.trackers: dict[str, HysteresisStateTracker] = {}
 
     def process_drift_report(
         self,
@@ -44,14 +55,32 @@ class AlertEngine:
     ) -> list[AlertModel]:
         """Process statistical drift results and generate appropriate WARNING alerts.
         
-        Hard rule: Drift alone NEVER raises a CRITICAL alert.
+        Hard rules:
+        - Drift alone NEVER raises a CRITICAL alert (strictly WARNING).
+        - Stateful hysteresis filters transient spikes (requires k-of-n window escalation).
         """
         created_alerts: list[AlertModel] = []
-        drifted = [r for r in report.results if r.decision]
-        if not drifted:
+
+        escalated_feats: list[str] = []
+        for r in report.results:
+            tracker = self.trackers.setdefault(
+                r.feature,
+                HysteresisStateTracker(
+                    k=self.k_hysteresis,
+                    n=self.n_hysteresis,
+                    threshold=r.threshold,
+                    hysteresis_margin=self.hysteresis_margin,
+                ),
+            )
+            val = float(r.effect_size) if r.decision else 0.0
+            is_alerting, _ = tracker.update(key=r.feature, value=val)
+            if is_alerting or (self.k_hysteresis == 1 and self.n_hysteresis == 1 and r.decision):
+                escalated_feats.append(r.feature)
+
+        if not escalated_feats:
             return created_alerts
 
-        affected_feats = sorted(list({r.feature for r in drifted}))
+        affected_feats = sorted(list(set(escalated_feats)))
         now_dt = datetime.now(UTC)
         alert_id = f"alert_drift_{uuid.uuid4().hex[:10]}"
 
@@ -63,7 +92,7 @@ class AlertEngine:
             severity=AlertSeverity.WARNING.value,  # Drift alone is WARNING, never CRITICAL
             status=AlertStatus.ACTIVE.value,
             affected_features_json=json.dumps(affected_feats),
-            reason=f"Significant statistical drift detected in {len(affected_feats)} feature(s): {', '.join(affected_feats[:5])}",
+            reason=f"Significant statistical drift confirmed via hysteresis in {len(affected_feats)} feature(s): {', '.join(affected_feats[:5])}",
             recommended_action="Inspect data ingestion pipelines for schema changes or upstream sensor shifts; evaluate delayed labels.",
             created_at=now_dt,
         )

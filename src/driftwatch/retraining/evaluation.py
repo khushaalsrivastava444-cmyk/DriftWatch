@@ -32,6 +32,45 @@ class ModelComparisonResult:
     details: dict[str, object]
 
 
+def diebold_mariano_hln_test(
+    champ_errors: np.ndarray,
+    cand_errors: np.ndarray,
+    h: int = 1,
+) -> tuple[float, float]:
+    """Diebold-Mariano test with Harvey-Leybourne-Newbold (HLN 1997) autocorrelation adjustment.
+    
+    H0: E[d_t] >= 0 (Candidate error is not smaller than Champion)
+    H1: E[d_t] < 0 (Candidate error is strictly smaller than Champion)
+    where d_t = cand_error_t - champ_error_t.
+    """
+    d = np.asarray(cand_errors, dtype=float) - np.asarray(champ_errors, dtype=float)
+    t_len = len(d)
+    if t_len < 5:
+        raise ValueError(f"Insufficient samples for DM test: {t_len} < 5")
+
+    mean_d = float(np.mean(d))
+    d_centered = d - mean_d
+
+    gamma_0 = float(np.mean(d_centered ** 2))
+    autocov_sum = 0.0
+    max_lag = max(1, h - 1)
+    for k in range(1, max_lag):
+        gamma_k = float(np.sum(d_centered[k:] * d_centered[:-k]) / t_len)
+        w = 1.0 - (k / (max_lag + 1))
+        autocov_sum += 2.0 * w * gamma_k
+
+    long_run_var = max(1e-12, (gamma_0 + autocov_sum) / t_len)
+    dm_stat = mean_d / np.sqrt(long_run_var)
+
+    # Harvey, Leybourne, and Newbold (1997) small-sample & autocorrelation correction
+    hln_factor = np.sqrt(max(0.01, (t_len + 1 - 2 * h + (h * (h - 1) / t_len)) / t_len))
+    stat_hln = float(dm_stat * hln_factor)
+
+    df = max(1, t_len - 1)
+    p_val = float(stats.t.cdf(stat_hln, df=df))
+    return stat_hln, p_val
+
+
 def compare_champion_challenger(
     y_true: np.ndarray,
     champion_preds: np.ndarray,
@@ -39,6 +78,7 @@ def compare_champion_challenger(
     metric_name: str = "MAE",
     alpha: float = 0.05,
     min_improvement_pct: float = 0.0,
+    forecast_horizon: int = 1,
 ) -> ModelComparisonResult:
     """Paired statistical hypothesis test comparing candidate against champion.
     
@@ -82,20 +122,24 @@ def compare_champion_challenger(
             details={"reason": "Candidate produces identical errors to champion"},
         )
 
-    # Wilcoxon signed-rank test (non-parametric paired test)
-    # Alternative 'less' tests if cand_errors < champ_errors
-    test_method = "Wilcoxon Signed-Rank Test"
+    # Diebold-Mariano test with Harvey-Leybourne-Newbold autocorrelation correction
+    test_method = "Diebold-Mariano Test (HLN 1997 Corrected)"
     try:
-        # Wilcoxon requires non-zero differences
-        res = stats.wilcoxon(cand_errors, champ_errors, alternative="less", zero_method="pratt")
-        stat = float(res.statistic)
-        p_val = float(res.pvalue)
+        stat, p_val = diebold_mariano_hln_test(champ_errors, cand_errors, h=forecast_horizon)
     except Exception as e:
-        logger.warning("Wilcoxon test encountered fallback condition (%s); using paired t-test", e)
-        test_method = "Paired Student's t-test"
-        res_t = stats.ttest_rel(cand_errors, champ_errors, alternative="less")
-        stat = float(res_t.statistic)
-        p_val = float(res_t.pvalue)
+        logger.info("DM-HLN test fallback to Wilcoxon (%s); running non-parametric paired test", e)
+        test_method = "Wilcoxon Signed-Rank Test"
+        try:
+            # Wilcoxon requires non-zero differences
+            res = stats.wilcoxon(cand_errors, champ_errors, alternative="less", zero_method="pratt")
+            stat = float(res.statistic)
+            p_val = float(res.pvalue)
+        except Exception as e_w:
+            logger.warning("Wilcoxon test encountered fallback condition (%s); using paired t-test", e_w)
+            test_method = "Paired Student's t-test"
+            res_t = stats.ttest_rel(cand_errors, champ_errors, alternative="less")
+            stat = float(res_t.statistic)
+            p_val = float(res_t.pvalue)
 
     # Decision criteria:
     # 1. p-value < alpha (statistically significant superiority)

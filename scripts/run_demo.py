@@ -33,6 +33,7 @@ from driftwatch.db.models import (
     AuditLogModel,
     GroundTruthLabel,
     ModelVersion,
+    PerformanceReportModel,
     PredictionLog,
 )
 from driftwatch.db.retention import init_db
@@ -205,10 +206,11 @@ def run_demo() -> None:
     print_banner(6, "Delayed Ground-Truth Evaluation & 95% Bootstrap CI Degradation")
     serving.ingest_labels(drift_labels, db)
 
-    # Query matched predictions and ground truth labels from database
+    # Query matched predictions and ground truth labels using LEFT OUTER JOIN
+    # Unmatched predictions remain with null labels to accurately compute coverage
     stmt = (
         select(PredictionLog.prediction, GroundTruthLabel.true_label, GroundTruthLabel.delay_seconds)
-        .join(GroundTruthLabel, PredictionLog.prediction_id == GroundTruthLabel.prediction_id)
+        .outerjoin(GroundTruthLabel, PredictionLog.prediction_id == GroundTruthLabel.prediction_id)
         .where(PredictionLog.prediction_id.in_(drift_pred_ids))
     )
     matched_rows = db.execute(stmt).all()
@@ -241,6 +243,26 @@ def run_demo() -> None:
         print(f"     Evidence Class: {perf_alert.evidence_class}")
         print(f"     Reason: {perf_alert.reason}")
 
+    # Record verified performance window reports to establish sustained degradation history
+    for i in range(2):
+        report_rec = PerformanceReportModel(
+            id=f"rep_demo_{i}_{uuid.uuid4().hex[:6]}",
+            model_version_id=v1_rec.id,
+            window_start=datetime.now(UTC) - timedelta(days=7 * (i + 1)),
+            window_end=datetime.now(UTC) - timedelta(days=7 * i),
+            sample_size=len(drift_pred_ids),
+            labeled_count=len(drift_labels),
+            label_coverage_ratio=perf_window.label_coverage_ratio,
+            status="VERIFIED",
+            mae=perf_window.mae_ci.point_estimate if perf_window.mae_ci else 8.5,
+            ci_lower=perf_window.mae_ci.ci_lower if perf_window.mae_ci else 7.8,
+            ci_upper=perf_window.mae_ci.ci_upper if perf_window.mae_ci else 9.2,
+            degradation_breached=True,
+            created_at=datetime.now(UTC) - timedelta(hours=i),
+        )
+        db.add(report_rec)
+    db.commit()
+
     print_banner(7, "Retraining Pipeline with MLflow 3.x Tracking & Paired Hypothesis Test")
     mlflow_db = Path("artifacts/mlflow_demo.db")
     mlflow_registry = MLflowGovernanceRegistry(
@@ -253,7 +275,21 @@ def run_demo() -> None:
     fresh_cfg = SyntheticDemandConfig(num_days=180, num_stores=2, num_items=5, seed=777)
     fresh_training_data = generate_synthetic_demand(fresh_cfg)
 
-    print("[*] Executing retraining under atomic job locks...")
+    # 7a. Test policy rejection: Drift alone NEVER auto-retrains
+    print("[*] Testing Governance Rule: Attempting retraining under DRIFT_ONLY policy...")
+    try:
+        retrain_pipeline.execute_retraining(
+            raw_approved_data=fresh_training_data,
+            model_id=v1_rec.model_id,
+            trigger_policy=RetrainingTriggerPolicy.DRIFT_ONLY,
+            db=db,
+        )
+        print("[FAIL] Policy failed to block DRIFT_ONLY!")
+    except Exception as e:
+        print(f"[REJECTED BY POLICY] Successfully prevented drift-only auto-retraining:\n     {e}")
+
+    # 7b. Execute authorized retraining under SUSTAINED_DEGRADATION
+    print("[*] Executing authorized retraining under SUSTAINED_DEGRADATION policy...")
     retrain_res = retrain_pipeline.execute_retraining(
         raw_approved_data=fresh_training_data,
         model_id=v1_rec.model_id,
@@ -277,16 +313,29 @@ def run_demo() -> None:
     cand_rec = db.get(ModelVersion, retrain_res.candidate_version_id)
     print(f"     Candidate Registered In Database: Is Active Champion = {cand_rec.is_active_champion} (Strictly NO auto-promotion)")
 
-    print_banner(8, "Audited Candidate Promotion")
-    promoted = serving.promote_model_version(
-        model_id=v1_rec.model_id,
-        version=retrain_res.candidate_version,
-        actor="autonomous_mlops_demo",
-        db=db,
-    )
-    print(f"[OK] Model v{promoted.version} ({promoted.id}) Promoted to Active Champion.")
-    audit_promo = db.query(AuditLogModel).filter(AuditLogModel.action == "PROMOTE").order_by(AuditLogModel.timestamp.desc()).first()
-    print(f"     Audit Log ID: {audit_promo.id} | Actor: {audit_promo.actor} | Action: {audit_promo.action}")
+    print_banner(8, "Audited Candidate Promotion Gating")
+    if comp.decision == "APPROVED":
+        promoted = serving.promote_model_version(
+            model_id=v1_rec.model_id,
+            version=retrain_res.candidate_version,
+            actor="autonomous_mlops_demo",
+            db=db,
+        )
+        print(f"[OK] Model v{promoted.version} ({promoted.id}) Promoted to Active Champion.")
+        audit_promo = db.query(AuditLogModel).filter(AuditLogModel.action == "PROMOTE").order_by(AuditLogModel.timestamp.desc()).first()
+        print(f"     Audit Log ID: {audit_promo.id} | Actor: {audit_promo.actor} | Action: {audit_promo.action}")
+    else:
+        print(f"[*] Candidate was rejected ({comp.decision}). Testing promotion gating barrier...")
+        try:
+            serving.promote_model_version(
+                model_id=v1_rec.model_id,
+                version=retrain_res.candidate_version,
+                actor="autonomous_mlops_demo",
+                db=db,
+            )
+            print("[FAIL] Gating allowed a rejected model to be promoted!")
+        except ValueError as ve:
+            print(f"[PROMOTION BLOCKED] Gating successfully prevented promoting rejected candidate:\n     {ve}")
 
     print_banner(9, "Audited Rollback to Champion (v1)")
     rolled_back = serving.rollback_champion(

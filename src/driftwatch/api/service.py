@@ -26,6 +26,7 @@ from driftwatch.db.models import (
     AuditLogModel,
     GroundTruthLabel,
     Model,
+    ModelEvaluationModel,
     ModelVersion,
     PredictionLog,
 )
@@ -164,7 +165,7 @@ class ModelServingService:
         if self.active_forecaster is not None:
             raw_pred = self.active_forecaster.predict(feat_df)[0]
         else:
-            raw_pred = float(feat_dict.get("lag_1", 10.0))
+            raise RuntimeError("Active model forecaster artifact unavailable; silent fallback is prohibited.")
 
         latency_ms = (time.perf_counter() - start_time) * 1000.0
         now_dt = datetime.now(UTC)
@@ -251,9 +252,21 @@ class ModelServingService:
         version: int | None = None,
         version_id: str | None = None,
         actor: str = "admin",
-        db: Session = None,
+        db: Session = None,  # type: ignore[assignment]
     ) -> ModelVersion:
-        """Promote a specific candidate model version to active champion (audited)."""
+        """Promote a specific candidate model version to active champion (audited).
+        
+        Guarantees:
+        1. Actor is explicit and non-empty.
+        2. Target version exists and belongs to requested model.
+        3. Statistical evaluation exists for candidate.
+        4. Evaluation decision is strictly "APPROVED".
+        5. Candidate artifact exists on disk and loads successfully BEFORE DB updates.
+        6. Promotion and incumbent demotion are committed atomically with audit log.
+        """
+        if not actor or not actor.strip():
+            raise ValueError("Promotion requires an explicit, authenticated actor identifier.")
+
         if version_id:
             target = db.get(ModelVersion, version_id)
         elif version is not None:
@@ -269,7 +282,59 @@ class ModelServingService:
         if not target:
             raise ValueError(f"Model version not found (id={version_id}, v={version}).")
 
-        # Unset existing champions
+        if target.model_id != model_id:
+            raise ValueError(
+                f"Model version {target.id} belongs to model '{target.model_id}', not requested model '{model_id}'."
+            )
+
+        # 3 & 4. Check Candidate Evaluation decision
+        evaluation = db.execute(
+            select(ModelEvaluationModel)
+            .where(ModelEvaluationModel.candidate_version_id == target.id)
+            .order_by(desc(ModelEvaluationModel.created_at))
+        ).scalars().first()
+
+        if not evaluation:
+            raise ValueError(
+                f"Cannot promote candidate {target.id}: No statistical evaluation record found. "
+                "Un-evaluated models cannot be promoted."
+            )
+
+        if evaluation.decision != "APPROVED":
+            raise ValueError(
+                f"Cannot promote candidate {target.id}: Candidate evaluation decision is '{evaluation.decision}'. "
+                "Statistically rejected models cannot be promoted."
+            )
+
+        # 5. Verify Artifact Exists and Loads BEFORE touching the database
+        art_path = Path(target.artifact_uri)
+        if not art_path.exists():
+            fallback = self.models_dir / art_path.name
+            if fallback.exists():
+                art_path = fallback
+            else:
+                raise FileNotFoundError(f"Candidate model artifact file missing at {target.artifact_uri}")
+
+        forecaster = XGBoostDemandForecaster()
+        try:
+            forecaster.load_model(str(art_path))
+        except Exception as e:
+            raise RuntimeError(f"Candidate model artifact failed validation load: {e}") from e
+
+        # Try to load associated feature pipeline artifact if present
+        pipe_path = self.models_dir / f"pipeline_{target.id}.joblib"
+        if not pipe_path.exists():
+            pipe_fallback = self.models_dir / f"{target.id}_pipeline.joblib"
+            if pipe_fallback.exists():
+                pipe_path = pipe_fallback
+        loaded_pipeline = None
+        if pipe_path.exists():
+            try:
+                loaded_pipeline = DemandFeaturePipeline.load(pipe_path)
+            except Exception as e:
+                logger.warning("Feature pipeline load notice for %s: %s", target.id, e)
+
+        # 6. Atomically switch champions
         incumbents = db.execute(
             select(ModelVersion).where(
                 ModelVersion.model_id == model_id,
@@ -287,24 +352,28 @@ class ModelServingService:
             actor=actor,
             entity_type="ModelVersion",
             entity_id=target.id,
-            details_json=f'{{"version": {target.version}, "previous_champion": "{incumbents[0].id if incumbents else "none"}"}}',
+            details_json=json.dumps({
+                "version": target.version,
+                "previous_champion": incumbents[0].id if incumbents else "none",
+                "evaluation_decision": evaluation.decision,
+                "candidate_mae": evaluation.candidate_metric,
+                "champion_mae": evaluation.champion_metric,
+                "p_value": evaluation.p_value_paired,
+            }),
         )
         db.add(audit)
         db.commit()
 
         self.active_version_id = target.id
         self.active_model_id = target.model_id
-        art_path = Path(target.artifact_uri)
-        if not art_path.exists():
-            fallback = self.models_dir / art_path.name
-            if fallback.exists():
-                art_path = fallback
-        if art_path.exists():
-            forecaster = XGBoostDemandForecaster()
-            forecaster.load_model(str(art_path))
-            self.active_forecaster = forecaster
+        self.active_forecaster = forecaster
+        if loaded_pipeline is not None:
+            self.pipeline = loaded_pipeline
 
-        logger.info("Promoted model %s v%d (ID: %s) to active champion", model_id, version, target.id)
+        logger.info(
+            "Promoted approved model %s v%d (ID: %s) to active champion",
+            model_id, target.version, target.id
+        )
         return target
 
     def rollback_champion(
@@ -314,6 +383,9 @@ class ModelServingService:
         db: Session,
     ) -> ModelVersion:
         """Rollback active champion to previous champion version (audited)."""
+        if not actor or not actor.strip():
+            raise ValueError("Rollback requires an explicit, authenticated actor identifier.")
+
         current = db.execute(
             select(ModelVersion).where(
                 ModelVersion.model_id == model_id,
@@ -331,6 +403,23 @@ class ModelServingService:
             raise ValueError("No prior model version available for rollback.")
 
         prev = candidates[0]
+
+        # Verify Artifact Exists and Loads BEFORE touching the database
+        art_path = Path(prev.artifact_uri)
+        if not art_path.exists():
+            fallback = self.models_dir / art_path.name
+            if fallback.exists():
+                art_path = fallback
+            else:
+                raise FileNotFoundError(f"Rollback candidate model artifact missing at {prev.artifact_uri}")
+
+        forecaster = XGBoostDemandForecaster()
+        try:
+            forecaster.load_model(str(art_path))
+        except Exception as e:
+            raise RuntimeError(f"Rollback candidate artifact failed validation load: {e}") from e
+
+        # Atomically switch champions
         if current:
             current.is_active_champion = False
         prev.is_active_champion = True
@@ -341,22 +430,17 @@ class ModelServingService:
             actor=actor,
             entity_type="ModelVersion",
             entity_id=prev.id,
-            details_json=f'{{"restored_version": {prev.version}, "rolled_back_from": "{current.id if current else "none"}"}}',
+            details_json=json.dumps({
+                "restored_version": prev.version,
+                "rolled_back_from": current.id if current else "none",
+            }),
         )
         db.add(audit)
         db.commit()
 
         self.active_version_id = prev.id
         self.active_model_id = prev.model_id
-        art_path = Path(prev.artifact_uri)
-        if not art_path.exists():
-            fallback = self.models_dir / art_path.name
-            if fallback.exists():
-                art_path = fallback
-        if art_path.exists():
-            forecaster = XGBoostDemandForecaster()
-            forecaster.load_model(str(art_path))
-            self.active_forecaster = forecaster
+        self.active_forecaster = forecaster
 
         logger.info("Rolled back model %s to champion v%d (ID: %s)", model_id, prev.version, prev.id)
         return prev

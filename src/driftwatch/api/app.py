@@ -6,7 +6,6 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-from pathlib import Path
 from typing import Any
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -31,12 +30,10 @@ from driftwatch.api.schemas import (
 from driftwatch.api.service import serving_service
 from driftwatch.db.base import get_db
 from driftwatch.db.models import (
-    AuditLogModel,
     Model,
     ModelVersion,
 )
 from driftwatch.db.retention import init_db
-from driftwatch.models.xgboost_forecaster import XGBoostDemandForecaster
 
 logger = logging.getLogger(__name__)
 
@@ -251,57 +248,30 @@ def promote_candidate(
     actor: str = "admin",
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
-    """Promote a candidate model to Active Champion and demote previous champion (audited)."""
+    """Promote an approved candidate model to Active Champion (audited)."""
     target = db.get(ModelVersion, version_id)
     if not target:
         raise HTTPException(status_code=404, detail=f"Model version '{version_id}' not found.")
 
-    # Find incumbent champion
-    incumbents = (
-        db.execute(
-            select(ModelVersion).where(
-                ModelVersion.model_id == target.model_id,
-                ModelVersion.is_active_champion == True,
-            )
+    try:
+        promoted = serving_service.promote_model_version(
+            model_id=target.model_id,
+            version_id=version_id,
+            actor=actor,
+            db=db,
         )
-        .scalars()
-        .all()
-    )
-    for inc in incumbents:
-        inc.is_active_champion = False
-
-    target.is_active_champion = True
-
-    # Audit log entry
-    audit = AuditLogModel(
-        id=f"audit_{uuid.uuid4().hex[:12]}",
-        action="PROMOTE",
-        actor=actor,
-        entity_type="ModelVersion",
-        entity_id=version_id,
-        details_json=f'{{"previous_champion": "{incumbents[0].id if incumbents else "none"}"}}',
-    )
-    db.add(audit)
-    db.commit()
-
-    serving_service.active_version_id = target.id
-    serving_service.active_model_id = target.model_id
-    art_path = Path(target.artifact_uri)
-    if not art_path.exists():
-        fallback = Path("artifacts/models") / art_path.name
-        if fallback.exists():
-            art_path = fallback
-    if art_path.exists():
-        forecaster = XGBoostDemandForecaster()
-        forecaster.load_model(str(art_path))
-        serving_service.active_forecaster = forecaster
-
-    return {
-        "status": "promoted",
-        "new_champion_id": target.id,
-        "version": target.version,
-        "model_id": target.model_id,
-    }
+        return {
+            "status": "promoted",
+            "new_champion_id": promoted.id,
+            "version": promoted.version,
+            "model_id": promoted.model_id,
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve)) from ve
+    except FileNotFoundError as fe:
+        raise HTTPException(status_code=404, detail=str(fe)) from fe
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post(
@@ -315,61 +285,21 @@ def rollback_champion(
     db: Session = Depends(get_db),
 ) -> dict[str, Any]:
     """Rollback to the previous stable champion version (audited)."""
-    # Find current champion
-    current = (
-        db.execute(
-            select(ModelVersion).where(
-                ModelVersion.model_id == model_id,
-                ModelVersion.is_active_champion == True,
-            )
+    try:
+        restored = serving_service.rollback_champion(
+            model_id=model_id,
+            actor=actor,
+            db=db,
         )
-        .scalars()
-        .first()
-    )
-
-    # Find previous version
-    candidates = (
-        db.execute(
-            select(ModelVersion)
-            .where(ModelVersion.model_id == model_id, ModelVersion.is_active_champion == False)
-            .order_by(desc(ModelVersion.version))
-        )
-        .scalars()
-        .all()
-    )
-
-    if not candidates:
-        raise HTTPException(status_code=400, detail="No prior model version available for rollback.")
-
-    prev = candidates[0]
-    if current:
-        current.is_active_champion = False
-    prev.is_active_champion = True
-
-    audit = AuditLogModel(
-        id=f"audit_{uuid.uuid4().hex[:12]}",
-        action="ROLLBACK",
-        actor=actor,
-        entity_type="ModelVersion",
-        entity_id=prev.id,
-        details_json=f'{{"rolled_back_from": "{current.id if current else "none"}"}}',
-    )
-    db.add(audit)
-    db.commit()
-
-    serving_service.active_version_id = prev.id
-    art_path = Path(prev.artifact_uri)
-    if not art_path.exists():
-        fallback = Path("artifacts/models") / art_path.name
-        if fallback.exists():
-            art_path = fallback
-    if art_path.exists():
-        forecaster = XGBoostDemandForecaster()
-        forecaster.load_model(str(art_path))
-        serving_service.active_forecaster = forecaster
-
-    return {
-        "status": "rolled_back",
-        "restored_champion_id": prev.id,
-        "version": prev.version,
-    }
+        return {
+            "status": "rolled_back",
+            "restored_champion_id": restored.id,
+            "version": restored.version,
+            "model_id": model_id,
+        }
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve)) from ve
+    except FileNotFoundError as fe:
+        raise HTTPException(status_code=404, detail=str(fe)) from fe
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e

@@ -101,18 +101,43 @@ def evaluate_dual_gating_decision(
         
     Note: Thresholds are labeled domain heuristics.
     """
-    is_significant = (p_value < alpha) if p_value is not None else True
-    is_effect_substantial = (effect_size >= effect_size_threshold)
+    if p_value is None:
+        is_effect_substantial = effect_size >= effect_size_threshold
+        if is_effect_substantial:
+            reason = (
+                f"Drift confirmed (effect-size detector): Effect size {effect_size:.4f} >= "
+                f"{effect_size_threshold:.4f} (Heuristic threshold detector without hypothesis test)"
+            )
+        else:
+            reason = (
+                f"Drift rejected (effect-size detector): Effect size {effect_size:.4f} < "
+                f"{effect_size_threshold:.4f}"
+            )
+        return is_effect_substantial, reason
 
+    is_significant = p_value < alpha
+    is_effect_substantial = effect_size >= effect_size_threshold
     is_drift = bool(is_significant and is_effect_substantial)
-    
+
     if is_drift:
-        reason = f"Drift confirmed: Statistically significant (p={p_value}) AND substantive effect size ({effect_size:.4f} >= {effect_size_threshold:.4f})"
+        reason = (
+            f"Drift confirmed (dual-gated): Statistically significant (p={p_value:.6f} < {alpha}) "
+            f"AND substantive effect size ({effect_size:.4f} >= {effect_size_threshold:.4f})"
+        )
     elif not is_significant and is_effect_substantial:
-        reason = f"Drift rejected: Effect size ({effect_size:.4f}) is substantial, but lacks statistical significance (p={p_value} >= {alpha})"
+        reason = (
+            f"Drift rejected: Effect size ({effect_size:.4f}) is substantial, but lacks "
+            f"statistical significance (p={p_value:.6f} >= {alpha})"
+        )
     elif is_significant and not is_effect_substantial:
-        reason = f"Drift rejected (large-N guard): Statistically significant (p={p_value} < {alpha}) but trivial effect size ({effect_size:.4f} < {effect_size_threshold:.4f})"
+        reason = (
+            f"Drift rejected (large-N guard): Statistically significant (p={p_value:.6f} < {alpha}) "
+            f"but trivial effect size ({effect_size:.4f} < {effect_size_threshold:.4f})"
+        )
     else:
-        reason = f"Drift rejected: Neither statistically significant (p={p_value}) nor substantial effect ({effect_size:.4f})"
+        reason = (
+            f"Drift rejected: Neither statistically significant (p={p_value:.6f}) "
+            f"nor substantial effect ({effect_size:.4f})"
+        )
 
     return is_drift, reason

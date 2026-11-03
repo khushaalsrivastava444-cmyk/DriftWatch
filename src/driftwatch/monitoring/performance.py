@@ -50,49 +50,75 @@ class EvaluatedPerformanceWindow:
     details: dict[str, object]
 
 
-def compute_block_bootstrap_ci(
+def compute_stationary_bootstrap_ci(
     errors: np.ndarray,
-    block_size: int = 7,
+    expected_block_size: int = 7,
     n_bootstrap: int = 500,
     confidence_level: float = 0.95,
     seed: int = 42,
+    min_samples: int = 15,
+    block_size: int | None = None,
 ) -> BootstrapConfidenceInterval:
-    """Compute stationary block bootstrap confidence interval for mean absolute error."""
+    """Compute Politis & Romano (1994) stationary bootstrap confidence interval for MAE.
+    
+    Properties:
+    - Block lengths geometrically distributed with parameter p = 1 / expected_block_size.
+    - Circular index wrapping modulo n ensures strict stationarity.
+    - Requires min_samples (>= 15) to guarantee valid empirical distribution.
+    """
+    if block_size is not None:
+        expected_block_size = block_size
     n = len(errors)
-    if n < block_size or n < 10:
-        mean_err = float(np.mean(errors)) if n > 0 else 0.0
+    mean_err = float(np.mean(errors)) if n > 0 else 0.0
+    if n < min_samples:
         return BootstrapConfidenceInterval(
             metric_name="mae",
             point_estimate=mean_err,
-            ci_lower=mean_err,
-            ci_upper=mean_err,
+            ci_lower=float("nan"),
+            ci_upper=float("nan"),
+            confidence_level=confidence_level,
             n_bootstrap=n_bootstrap,
         )
 
     rng = np.random.default_rng(seed)
-    num_blocks = int(np.ceil(n / block_size))
+    p = 1.0 / max(1, expected_block_size)
     boot_means = np.empty(n_bootstrap, dtype=float)
 
     for b in range(n_bootstrap):
-        # Sample starting indices of blocks
-        block_starts = rng.integers(0, n - block_size + 1, size=num_blocks)
-        sample_indices = np.concatenate([np.arange(start, start + block_size) for start in block_starts])[:n]
-        boot_sample = errors[sample_indices]
+        # Politis-Romano stationary bootstrap index selection
+        indices = np.empty(n, dtype=int)
+        current_idx = int(rng.integers(0, n))
+        indices[0] = current_idx
+
+        new_block_flags = rng.random(size=n) < p
+        random_starts = rng.integers(0, n, size=n)
+
+        for i in range(1, n):
+            if new_block_flags[i]:
+                current_idx = int(random_starts[i])
+            else:
+                current_idx = (current_idx + 1) % n
+            indices[i] = current_idx
+
+        boot_sample = errors[indices]
         boot_means[b] = np.mean(boot_sample)
 
     alpha = 1.0 - confidence_level
     ci_low = float(np.percentile(boot_means, (alpha / 2.0) * 100))
     ci_high = float(np.percentile(boot_means, (1.0 - alpha / 2.0) * 100))
-    point_est = float(np.mean(errors))
 
     return BootstrapConfidenceInterval(
         metric_name="mae",
-        point_estimate=point_est,
+        point_estimate=mean_err,
         ci_lower=ci_low,
         ci_upper=ci_high,
         confidence_level=confidence_level,
         n_bootstrap=n_bootstrap,
     )
+
+
+# Backward-compatible alias
+compute_block_bootstrap_ci = compute_stationary_bootstrap_ci
 
 
 class PerformanceEvaluator:
@@ -121,6 +147,7 @@ class PerformanceEvaluator:
         pred_col: str = "prediction",
         true_col: str = "true_label",
         delay_col: str = "delay_seconds",
+        total_window_predictions: int | None = None,
     ) -> EvaluatedPerformanceWindow:
         """Evaluate matched prediction and ground-truth data in a time window.
         
@@ -129,8 +156,12 @@ class PerformanceEvaluator:
             window_id: Identifier for window.
             window_start: ISO start date.
             window_end: ISO end date.
+            pred_col: Column for predictions.
+            true_col: Column for ground-truth labels.
+            delay_col: Column for label arrival delay in seconds.
+            total_window_predictions: Optional full window prediction count (if matched_df was filtered).
         """
-        total_preds = len(matched_df)
+        total_preds = total_window_predictions if total_window_predictions is not None else len(matched_df)
         if total_preds == 0:
             return EvaluatedPerformanceWindow(
                 window_id=window_id,
@@ -148,9 +179,9 @@ class PerformanceEvaluator:
                 details={"reason": "Empty prediction window"},
             )
 
-        labeled_mask = matched_df[true_col].notna()
+        labeled_mask = matched_df[true_col].notna() if true_col in matched_df.columns else pd.Series(False, index=matched_df.index)
         labeled_count = int(labeled_mask.sum())
-        coverage = labeled_count / total_preds
+        coverage = (labeled_count / total_preds) if total_preds > 0 else 0.0
 
         # Delay statistics
         if delay_col in matched_df.columns and labeled_count > 0:
@@ -178,6 +209,26 @@ class PerformanceEvaluator:
                 degradation_breached=False,
                 details={
                     "reason": f"Coverage {coverage:.1%} below maturity threshold ({self.min_coverage_threshold:.1%})"
+                },
+            )
+
+        # Enforce UNVERIFIED status if sample size is too small for valid stationary bootstrap (< 15)
+        if labeled_count < 15:
+            return EvaluatedPerformanceWindow(
+                window_id=window_id,
+                window_start=window_start,
+                window_end=window_end,
+                total_predictions=total_preds,
+                labeled_count=labeled_count,
+                label_coverage_ratio=coverage,
+                mean_delay_seconds=mean_delay,
+                median_delay_seconds=median_delay,
+                status="UNVERIFIED",
+                metrics=None,
+                mae_ci=None,
+                degradation_breached=False,
+                details={
+                    "reason": f"Insufficient labeled observations (n={labeled_count} < 15) for stationary bootstrap."
                 },
             )
 

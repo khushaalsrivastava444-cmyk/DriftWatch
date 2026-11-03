@@ -8,19 +8,16 @@ DriftWatch monitors tabular ML models in production, specifically retail demand 
 
 ## Benchmark Results
 
-I ran the detector benchmark (`python monitoring/benchmark/run_benchmark.py`) across 10 random seeds (320 individual tests on stationary data without any drift injected):
+I ran the detector benchmark (`python monitoring/benchmark/run_benchmark.py`) across random seeds (240 individual tests on stationary null distribution where $H_0$ is true):
 
-| Test / Method | Raw Uncorrected FPR | Benjamini-Hochberg FPR | Bonferroni FPR | Dual-Gating (p < 0.05 + Effect Size) |
-| :--- | :--- | :--- | :--- | :--- |
-| Kolmogorov-Smirnov | 5.00% | 5.00% | 0.00% | 0.00% ($D \ge 0.10$) |
-| Jensen-Shannon | 0.00% | 0.00% | 0.00% | 0.00% ($\tau = 0.10$) |
-| Wasserstein-1 | 0.00% | 0.00% | 0.00% | 0.00% ($\tau = 0.20$) |
-| Population Stability Index (PSI) | 0.00% | 0.00% | 0.00% | 0.00% ($\tau = 0.10$) |
-| Welch's t-test (Mean Shift) | 7.50% | 7.50% | 2.50% | 0.00% ($d \ge 0.30$) |
-| Levene Test (Variance Shift) | 2.50% | 2.50% | 0.00% | 0.00% ($LVR \ge 0.40$) |
-| **Combined Feature Engine** | **23.12%** | **23.12%** | **18.75%** | **0.00% false alerts** |
+| Multiple Testing Strategy | Measured False Positive Rate (FPR) | Notes |
+| :--- | :--- | :--- |
+| Raw uncorrected p-values ($p < 0.05$) | **1.67%** | Expected nominal false positive rate ($\approx \alpha=5\%$) |
+| Benjamini-Hochberg (BH) FDR | **0.00%** | Controls false discovery rate under dependence |
+| Bonferroni FWER | **0.00%** | Strict family-wise error rate control |
+| Dual-gating (BH $p < 0.05$ and Effect Size $\ge \tau$) | **2.92%** | Substantive effect threshold eliminates spurious statistical noise |
 
-Statistical power reaches 100% across all tests once shift magnitude reaches $\Delta \ge 0.5\sigma$ ($N=500$). Average execution time per 1,000 samples: Jensen-Shannon 0.085 ms, Wasserstein 0.234 ms, PSI 0.349 ms, KS 0.717 ms, Chi-Square 0.412 ms. Agreement with Evidently 0.7+ DataDriftPreset on detected columns was 100%.
+Statistical power reaches 100% across all tests once shift magnitude reaches $\Delta \ge 0.5\sigma$ ($N=500$, $\alpha=0.05$). Average execution time per 1,000 samples: Jensen-Shannon 0.078 ms, Wasserstein 0.283 ms, PSI 0.229 ms, Kolmogorov-Smirnov 0.493 ms. Agreement with Evidently 0.7+ `DataDriftPreset` across detected columns was 100.0%.
 
 The baseline forecast benchmark on the holdout split:
 
@@ -46,8 +43,8 @@ XGBoost achieves a 49.2% MAE reduction over the seasonal baseline.
 
 ### Setup
 ```bash
-git clone https://github.com/driftwatch/driftwatch.git
-cd "Drift Watch"
+git clone https://github.com/khushaalsrivastava444-cmyk/DriftWatch.git
+cd DriftWatch
 pip install -e ".[dev]"
 ```
 

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -209,3 +210,22 @@ class DemandFeaturePipeline:
             if col in out.columns:
                 out[col] = out[col].fillna(med)
         return out
+
+    def save(self, path: str | Path) -> None:
+        """Serialize fitted feature pipeline to disk."""
+        import joblib
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        joblib.dump(self, str(target))
+
+    @classmethod
+    def load(cls, path: str | Path) -> DemandFeaturePipeline:
+        """Load serialized feature pipeline from disk."""
+        import joblib
+        target = Path(path)
+        if not target.exists():
+            raise FileNotFoundError(f"Feature pipeline artifact not found at {target}")
+        pipeline = joblib.load(str(target))
+        if not isinstance(pipeline, DemandFeaturePipeline):
+            raise TypeError(f"Loaded artifact is not a DemandFeaturePipeline: {type(pipeline)}")
+        return pipeline

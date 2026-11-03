@@ -10,14 +10,16 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
-from driftwatch.data.split import temporal_train_val_test_split
+from driftwatch.data.split import rolling_origin_splits, temporal_train_val_test_split
 from driftwatch.db.models import (
     ModelEvaluationModel,
     ModelVersion,
+    PerformanceReportModel,
     RetrainingJobModel,
 )
 from driftwatch.features.pipeline import DemandFeaturePipeline
@@ -32,6 +34,7 @@ from driftwatch.retraining.evaluation import (
 )
 from driftwatch.retraining.policy import (
     RetrainingTriggerPolicy,
+    evaluate_retraining_trigger,
 )
 from driftwatch.retraining.registry import (
     MLflowGovernanceRegistry,
@@ -40,6 +43,11 @@ from driftwatch.retraining.registry import (
 from driftwatch.validation.engine import DataValidationEngine, ValidationConfig
 
 logger = logging.getLogger(__name__)
+
+
+class PolicyViolationError(ValueError):
+    """Raised when a retraining trigger policy rejects pipeline execution."""
+    pass
 
 
 @dataclass(frozen=True)
@@ -75,9 +83,12 @@ class RetrainingPipeline:
         db: Session,
         drift_context: str = "Automated retraining trigger",
         candidate_config: XGBoostForecasterConfig | None = None,
+        recent_performance_reports: list[PerformanceReportModel] | None = None,
+        k_required: int = 2,
+        n_recent: int = 3,
     ) -> RetrainingExecutionResult:
         """Run full end-to-end retraining pipeline under atomic job locks."""
-        # 1. Job Lock check (Idempotency)
+        # 1. Job Lock check (Idempotency) - reject concurrent executions immediately
         active_job = db.execute(
             select(RetrainingJobModel).where(RetrainingJobModel.status == "RUNNING")
         ).scalars().first()
@@ -97,7 +108,49 @@ class RetrainingPipeline:
         if not champion_version:
             raise ValueError(f"No active champion found for model {model_id} to evaluate against.")
 
-        # Load Champion forecaster from disk
+        # 3. Retraining Policy Enforcement (Hard rule: Drift alone NEVER auto-retrains)
+        if trigger_policy == RetrainingTriggerPolicy.SUSTAINED_DEGRADATION and recent_performance_reports is None:
+            recent_performance_reports = db.execute(
+                select(PerformanceReportModel)
+                .where(PerformanceReportModel.model_version_id == champion_version.id)
+                .order_by(desc(PerformanceReportModel.created_at))
+                .limit(10)
+            ).scalars().all()
+
+        policy_result = evaluate_retraining_trigger(
+            policy=trigger_policy,
+            recent_performance_reports=recent_performance_reports,
+            k_required=k_required,
+            n_recent=n_recent,
+        )
+
+        if not policy_result.should_retrain:
+            job_id = f"retrain_{uuid.uuid4().hex[:10]}"
+            rejected_job = RetrainingJobModel(
+                id=job_id,
+                trigger_policy=trigger_policy.value,
+                status="REJECTED",
+                champion_version_id=champion_version.id,
+                metrics_comparison_json=json.dumps({
+                    "decision": "REJECTED",
+                    "reason": policy_result.reason,
+                    "details": policy_result.details,
+                }),
+                created_at=datetime.now(UTC),
+                completed_at=datetime.now(UTC),
+            )
+            db.add(rejected_job)
+            db.commit()
+            logger.warning(
+                "Retraining execution rejected by policy %s: %s",
+                trigger_policy.value,
+                policy_result.reason,
+            )
+            raise PolicyViolationError(
+                f"Retraining execution rejected by policy '{trigger_policy.value}': {policy_result.reason}"
+            )
+
+        # 4. Load Champion forecaster from disk
         champion_forecaster = XGBoostDemandForecaster()
         artifact_path = Path(champion_version.artifact_uri)
         if not artifact_path.exists():
@@ -108,7 +161,7 @@ class RetrainingPipeline:
                 raise FileNotFoundError(f"Champion artifact missing at {champion_version.artifact_uri}")
         champion_forecaster.load_model(str(artifact_path))
 
-        # 3. Register PENDING/RUNNING job in DB
+        # 4. Register RUNNING job in DB
         job_id = f"retrain_{uuid.uuid4().hex[:10]}"
         job = RetrainingJobModel(
             id=job_id,
@@ -121,14 +174,14 @@ class RetrainingPipeline:
         db.commit()
 
         try:
-            # 4. Ingestion Validation
+            # 5. Ingestion Validation
             report, clean_df, quarantined_df = self.validation_engine.validate(raw_approved_data)
             if len(clean_df) < 50:
                 raise ValueError(f"Insufficient validated rows for retraining: {len(clean_df)} < 50")
 
             data_hash = hashlib.sha256(clean_df.to_json(orient="records", date_format="iso").encode()).hexdigest()
 
-            # 5. Temporal Train/Val/Test Split
+            # 6. Temporal Train/Val/Test Split + Rolling-Origin Walk-Forward CV
             parts = temporal_train_val_test_split(clean_df, train_ratio=0.70, val_ratio=0.15)
 
             pipeline = DemandFeaturePipeline()
@@ -137,7 +190,7 @@ class RetrainingPipeline:
             val_feats = pipeline.transform(parts.val)
             test_feats = pipeline.transform(parts.test)
 
-            # 6. Train Candidate Model
+            # 7. Train Candidate Model
             cfg = candidate_config or XGBoostForecasterConfig(
                 n_estimators=100,
                 max_depth=5,
@@ -150,7 +203,27 @@ class RetrainingPipeline:
                 eval_set=[(val_feats, val_feats["sales"])],
             )
 
-            # 7. Evaluate Champion and Candidate on Unseen Test Partition
+            # Rolling-origin walk-forward CV check
+            cv_champ_errors: list[float] = []
+            cv_cand_errors: list[float] = []
+            try:
+                for fold_train, fold_test in rolling_origin_splits(
+                    clean_df, n_splits=3, horizon_days=14, min_train_days=45
+                ):
+                    if len(fold_train) >= 30 and len(fold_test) >= 5:
+                        f_pipe = DemandFeaturePipeline()
+                        f_pipe.fit(fold_train)
+                        f_test_feats = f_pipe.transform(fold_test)
+                        if "sales" in f_test_feats.columns:
+                            y_f = f_test_feats["sales"].to_numpy(dtype=float)
+                            c_preds = champion_forecaster.predict(f_test_feats)
+                            k_preds = candidate_forecaster.predict(f_test_feats)
+                            cv_champ_errors.extend(list(np.abs(y_f - c_preds)))
+                            cv_cand_errors.extend(list(np.abs(y_f - k_preds)))
+            except Exception as cv_err:
+                logger.info("Rolling origin CV fold notice: %s", cv_err)
+
+            # 8. Evaluate Champion and Candidate on Unseen Test Partition
             y_test = test_feats["sales"].values
             champ_preds = champion_forecaster.predict(test_feats)
             cand_preds = candidate_forecaster.predict(test_feats)
@@ -193,6 +266,7 @@ class RetrainingPipeline:
                 feature_config=pipeline.get_feature_config(),
                 drift_context=drift_context,
                 models_dir=self.models_dir,
+                pipeline=pipeline,
             )
 
             # 10. Register Candidate in DB (is_active_champion=False strictly!)

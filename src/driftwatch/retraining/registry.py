@@ -27,6 +27,7 @@ class MLflowRunMetadata:
     artifact_uri: str
     git_sha: str
     data_hash: str
+    pipeline_uri: str | None = None
 
 
 def get_git_commit_sha() -> str:
@@ -67,6 +68,7 @@ class MLflowGovernanceRegistry:
         feature_config: dict[str, Any],
         drift_context: str,
         models_dir: Path,
+        pipeline: Any | None = None,
     ) -> MLflowRunMetadata:
         """Execute a fully auditable MLflow logging transaction."""
         models_dir.mkdir(parents=True, exist_ok=True)
@@ -96,13 +98,19 @@ class MLflowGovernanceRegistry:
             artifact_file = models_dir / f"model_v{model_version}_{run_id[:8]}.json"
             forecaster.save_model(str(artifact_file))
             mlflow.log_artifact(str(artifact_file), artifact_path="model")
-
-            # Local URI used for high-performance serving
             local_artifact_uri = str(artifact_file.resolve())
 
+            # 5. Save and Log Feature Pipeline Artifact
+            pipeline_uri = None
+            if pipeline is not None and hasattr(pipeline, "save"):
+                pipeline_file = models_dir / f"pipeline_v{model_version}_{run_id[:8]}.joblib"
+                pipeline.save(pipeline_file)
+                mlflow.log_artifact(str(pipeline_file), artifact_path="feature_pipeline")
+                pipeline_uri = str(pipeline_file.resolve())
+
             logger.info(
-                "Logged MLflow run %s for model v%d (Artifact: %s)",
-                run_id, model_version, local_artifact_uri
+                "Logged MLflow run %s for model v%d (Model: %s, Pipeline: %s)",
+                run_id, model_version, local_artifact_uri, pipeline_uri
             )
 
             return MLflowRunMetadata(
@@ -111,4 +119,5 @@ class MLflowGovernanceRegistry:
                 artifact_uri=local_artifact_uri,
                 git_sha=git_sha,
                 data_hash=data_hash,
+                pipeline_uri=pipeline_uri,
             )
