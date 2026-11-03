@@ -102,7 +102,7 @@ flowchart TD
    - Rolling-origin temporal evaluation (walk-forward CV).
    - Paired Wilcoxon signed-rank / paired t-test on test errors between Challenger and Champion.
    - MLflow parameter, metric, data hash, feature config, and artifact logging.
-   - Audited promotion requiring statistical superiority and explicit human/admin action. Single-step rollback capability.
+   - Audited promotion requiring statistical superiority and explicit operator/admin action. Single-step rollback capability.
 
 9. **Streamlit 7-Page Dashboard (`src/driftwatch/ui/`)**:
    - Professional dark charcoal theme with blue/green accents.
