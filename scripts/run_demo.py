@@ -298,7 +298,7 @@ def run_demo() -> None:
     audit_rollback = db.query(AuditLogModel).filter(AuditLogModel.action == "ROLLBACK").order_by(AuditLogModel.timestamp.desc()).first()
     print(f"     Audit Log ID: {audit_rollback.id} | Actor: {audit_rollback.actor} | Action: {audit_rollback.action}")
 
-    print_banner(10, "Tier 2 Capabilities Showcase")
+    print_banner(10, "Advanced Monitoring Checks")
     # 1. Split Conformal Prediction Intervals
     conformal = ConformalDemandForecaster(serving.active_forecaster, default_confidence_level=0.90)
     conformal.calibrate(base_feats, base_feats["sales"].values)
@@ -330,7 +330,7 @@ def run_demo() -> None:
     elapsed = time.perf_counter() - start_demo_time
 
     print("\n" + "=" * 80)
-    print(f"[SUCCESS] DRIFTWATCH DEMO COMPLETED SUCCESSFULLY IN {elapsed:.2f} SECONDS (CPU-ONLY)")
+    print(f"DriftWatch demo finished in {elapsed:.2f} seconds (CPU-only).")
     print("=" * 80)
 
 

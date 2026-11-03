@@ -1,4 +1,4 @@
-# DriftWatch — Engineering Progress Log
+# DriftWatch: Engineering Progress Log
 
 ## Project Summary
 - **Target**: Production ML drift detection, performance degradation estimation, hypothesis testing, multiple-testing control, leak-free feature pipelines, and statistically guarded retraining.
@@ -13,7 +13,7 @@
 - **Actions Taken**:
   - Inspected workspace `d:\projects`: Found `Monsoon Cast` (meteorological rainfall model, no demand forecasting or M5 files).
   - Formulated strategy for reproducible synthetic retail-demand data generator with documented seeds and provenance + fallback M5 Kaggle format loader.
-  - Authored comprehensive architectural blueprint in `docs/PLAN.md`.
+  - Authored architecture plan in `docs/PLAN.md`.
   - Pinned verified dependency versions in plan and system environment.
 - **Evidence**:
   - `docs/PLAN.md` created with complete Mermaid architecture, verified dependencies, top 5 risk register, and milestone DoDs.
@@ -26,7 +26,7 @@
 - **Date**: 2026-11-03
 - **Components Built**:
   - `src/driftwatch/data/synthetic.py`: Deterministic retail-demand generator with price elasticity, holiday seasonality, day-of-week multiplier, and promotion boosts. Explicit `is_synthetic = True` flag.
-  - `src/driftwatch/data/m5_loader.py`: Local M5 file loader with seamless synthetic fallback and provenance logs.
+  - `src/driftwatch/data/m5_loader.py`: Local M5 file loader with synthetic fallback and provenance logs.
   - `src/driftwatch/data/split.py`: Strict chronological train/validation/test partitions and rolling-origin walk-forward generators.
   - `src/driftwatch/features/pipeline.py`: Leak-free feature transformer (lags 1, 2, 7, 14, 28; rolling 7, 14, 28 stats with `shift(1)`; calendar; price discounts; training-only medians and quantiles).
   - `src/driftwatch/models/baseline.py`: Seasonal-naive benchmark forecaster ($y_t = y_{t-7}$).
@@ -150,7 +150,7 @@
   - `src/driftwatch/retraining/registry.py`: `MLflowGovernanceRegistry` integrating MLflow 3.x with SQLite/server tracking. Logs hyperparameters, validation/test metrics, SHA-256 data hash, pipeline feature configs, git commit SHA, and serialized XGBoost model artifacts.
   - `src/driftwatch/retraining/pipeline.py`: `RetrainingPipeline` executing end-to-end retraining under atomic job locks (preventing concurrent retraining runs), schema validation, leak-free feature pipelines, candidate training, temporal holdout evaluation, candidate version registration (`is_active_champion=False` strictly enforced to prevent auto-promotion), and evaluation recording.
   - `src/driftwatch/api/service.py`: Audited `promote_model_version` and `rollback_champion` updating champion pointers in database and hot-reloading memory forecasters, writing audit records to `audit_logs`.
-  - `tests/test_retraining_e2e.py`: 4 comprehensive unit and E2E lifecycle tests:
+  - `tests/test_retraining_e2e.py`: 4 unit and E2E lifecycle tests:
     - Policy trigger governance (drift alone rejected, transient vs sustained degradation).
     - Paired Wilcoxon hypothesis approval/rejection.
     - Concurrent job locks and idempotency.
@@ -199,7 +199,7 @@
   5. `scripts/run_demo.py`: Fully autonomous 10-step end-to-end demonstration running from scratch in **16.69 seconds** on CPU (well under the 10-minute constraint).
   6. `docs/adr/0003-evidence-classification-and-alert-gates.md`: Formal ADR establishing evidence taxonomy and severity gating.
   7. `docs/adr/0004-retraining-governance-and-paired-hypothesis-testing.md`: Formal ADR establishing retraining policies, Wilcoxon paired tests, and non-automatic candidate registration.
-  8. `README.md`: Comprehensive 10-section documentation with Mermaid component, operational, and lifecycle diagrams, LaTeX KaTeX formulas for all 10 statistical tests, drift vs degradation scenario matrix, empirical benchmark tables, and honest operational trade-offs.
+  8. `README.md`: Documentation with Mermaid component, operational, and lifecycle diagrams, LaTeX KaTeX formulas for all 10 statistical tests, drift vs degradation scenario matrix, empirical benchmark tables, and honest operational trade-offs.
 - **Evidence (Verification Outputs)**:
   - **Linter**: `ruff check src/ tests/ scripts/` -> **PASSED (0 errors, all checks passed)**
   - **Static Type Check**: `mypy src/driftwatch` -> **PASSED (0 errors across 57 source files)**

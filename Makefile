@@ -1,4 +1,4 @@
-# DriftWatch — Production MLOps Makefile
+# DriftWatch Makefile
 
 .PHONY: help install lint typecheck test benchmark demo ui api docker-build docker-up docker-down clean
 
@@ -7,16 +7,16 @@ PYTHON ?= python
 help:
 	@echo "Available commands:"
 	@echo "  make install      Install project in editable mode with development dependencies"
-	@echo "  make lint         Run ruff linter checks across all source code"
-	@echo "  make typecheck    Run mypy static type checking on driftwatch core"
-	@echo "  make test         Execute complete pytest suite"
-	@echo "  make benchmark    Run statistical detector benchmark (FPR, power, latency, Evidently)"
-	@echo "  make demo         Execute end-to-end autonomous demonstration (< 2 min CPU-only)"
-	@echo "  make ui           Launch 7-page dark charcoal Streamlit dashboard"
-	@echo "  make api          Launch FastAPI serving and monitoring daemon"
-	@echo "  make docker-build Build lean multi-stage production Docker container"
-	@echo "  make docker-up    Spin up full Docker Compose stack (API, Postgres, MLflow, Dashboard)"
-	@echo "  make docker-down  Tear down Docker Compose containers and networks"
+	@echo "  make lint         Run ruff checks across src, tests, and scripts"
+	@echo "  make typecheck    Run mypy type checking on src/driftwatch"
+	@echo "  make test         Run pytest suite"
+	@echo "  make benchmark    Run detector benchmark (FPR, power, latency, Evidently)"
+	@echo "  make demo         Run end-to-end demo (< 1 min CPU-only)"
+	@echo "  make ui           Launch Streamlit dashboard"
+	@echo "  make api          Launch FastAPI server"
+	@echo "  make docker-build Build Docker container"
+	@echo "  make docker-up    Start Docker Compose stack (API, Postgres, MLflow, Dashboard)"
+	@echo "  make docker-down  Tear down Docker Compose containers"
 
 install:
 	pip install -e ".[dev]"
