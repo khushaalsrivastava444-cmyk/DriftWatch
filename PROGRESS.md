@@ -2,7 +2,7 @@
 
 ## Project Summary
 - **Target**: Production ML drift detection, performance degradation estimation, hypothesis testing, multiple-testing control, leak-free feature pipelines, and statistically guarded retraining.
-- **Root Directory**: `d:\projects`
+- **Root Directory**: `D:\projects\Drift Watch` (with `D:\projects\driftwatch` junction)
 - **Memory & Resumption**: Maintained after every milestone.
 
 ---
