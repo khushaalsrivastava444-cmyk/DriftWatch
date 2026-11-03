@@ -30,7 +30,7 @@ class SimulationConfig:
 
 @dataclass
 class SimulationResult:
-    """Comprehensive output summary from a production replay run."""
+    """Output summary from a production replay simulation run."""
     total_days: int
     total_predictions: int
     total_labels_released: int

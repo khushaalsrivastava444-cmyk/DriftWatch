@@ -2,7 +2,7 @@
 
 Features:
 - Bins derived strictly from reference quantiles (never target data).
-- Robust Laplace smoothing (epsilon = 1e-4) to guarantee zero-bin safety.
+- Laplace smoothing (epsilon = 1e-4) to avoid zero-bin division.
 - Native categorical distribution support.
 - Fully vectorized with zero memory leaks.
 """

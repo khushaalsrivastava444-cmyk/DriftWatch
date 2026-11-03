@@ -39,12 +39,11 @@ class TestType(str, Enum):
 
 @dataclass(frozen=True)
 class FeatureDriftResult:
-    """Comprehensive, auditable record of an individual statistical drift evaluation.
-    
-    Adheres strictly to the brief requirement:
-    dataset_id, reference_id, window, feature, test, statistic, p_value,
+    """Record of an individual feature drift test.
+
+    Stores dataset_id, reference_id, window, feature, test, statistic, p_value,
     adjusted_p_value, effect_size, threshold, decision, sample_sizes,
-    timestamp, config_hash.
+    timestamp, and config_hash.
     """
     dataset_id: str
     reference_id: str

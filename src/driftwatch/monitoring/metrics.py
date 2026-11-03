@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class ForecastingMetrics:
-    """Comprehensive evaluation metrics container."""
+    """Forecast evaluation metrics."""
     mae: float
     rmse: float
     wape: float

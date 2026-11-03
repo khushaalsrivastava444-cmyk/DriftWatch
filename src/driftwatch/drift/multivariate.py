@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass(frozen=True)
 class MultivariateDriftResult:
-    """Comprehensive multivariate distribution drift evaluation."""
+    """Multivariate drift evaluation results."""
     method: str
     statistic: float  # AUC or MMD^2
     p_value: float

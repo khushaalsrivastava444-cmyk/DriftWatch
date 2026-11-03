@@ -95,7 +95,7 @@ flowchart TD
 7. **Replay Simulator & Detector Benchmark (`src/driftwatch/simulation/`, `monitoring/benchmark/`)**:
    - Time-ordered replay feeding real API in chronological batches.
    - Injection suite: stable baseline, mean shift, variance expansion, categorical shift, missingness spikes, prediction drift, and concept drift ($P(Y|X)$ modification).
-   - Comprehensive benchmark suite computing Empirical False Positive Rate (FPR), Detection Delay (number of steps to alert), Statistical Power vs Shift Magnitude, and Evidently agreement metrics across 20+ seeds.
+   - Benchmark suite computing Empirical False Positive Rate (FPR), Detection Delay (number of steps to alert), Statistical Power vs Shift Magnitude, and Evidently agreement metrics across 20+ seeds.
 
 8. **Retraining & Champion-Challenger Workflow (`src/driftwatch/retraining/`)**:
    - Trigger policies: sustained verified performance degradation, scheduled cadence, or explicit manual invocation. *Drift alone never triggers retraining*.
@@ -219,7 +219,7 @@ flowchart TD
   - Docker Compose configuration for API, Postgres, MLflow, and Streamlit.
   - GitHub Actions CI workflow (linting, type checking, unit + integration tests).
   - Automated `make demo` script executing end-to-end scenario under 10 minutes on CPU.
-  - Comprehensive README with Mermaid diagrams, mathematical formulas, and limitation disclosures.
+  - README with architecture diagrams, test math, and honest limitation disclosures.
 
 ---
 

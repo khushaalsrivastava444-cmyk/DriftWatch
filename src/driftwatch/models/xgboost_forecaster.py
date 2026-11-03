@@ -1,7 +1,7 @@
 """XGBoost Production Demand Forecaster.
 
-Provides a robust gradient boosted tree regressor tailored for tabular retail demand,
-equipped with feature importance introspection, early stopping, and CPU optimization.
+XGBoost regressor for tabular retail demand,
+with feature importance extraction and early stopping.
 """
 
 from __future__ import annotations

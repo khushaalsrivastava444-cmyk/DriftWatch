@@ -97,9 +97,7 @@ async def structured_exception_handler(request: Request, exc: Exception) -> JSON
     )
 
 
-# ============================================================================
 # Core Inference Endpoints
-# ============================================================================
 
 @app.post(
     "/api/v1/predict",
@@ -131,9 +129,7 @@ def predict_batch(
     return serving_service.predict_batch(request, db, request_id)
 
 
-# ============================================================================
 # Ground-Truth Label Association
-# ============================================================================
 
 @app.post(
     "/api/v1/labels",
@@ -154,9 +150,7 @@ def ingest_ground_truth(
     )
 
 
-# ============================================================================
 # Model Registry & Health Endpoints
-# ============================================================================
 
 @app.get("/health", response_model=HealthResponse, summary="System health check")
 def health(db: Session = Depends(get_db)) -> HealthResponse:
@@ -245,9 +239,7 @@ def get_model(model_id: str, db: Session = Depends(get_db)) -> ModelDetailRespon
     )
 
 
-# ============================================================================
 # Admin Promotion & Rollback Endpoints
-# ============================================================================
 
 @app.post(
     "/api/v1/models/{version_id}/promote",

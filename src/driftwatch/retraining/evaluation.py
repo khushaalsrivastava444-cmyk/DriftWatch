@@ -82,7 +82,7 @@ def compare_champion_challenger(
             details={"reason": "Candidate produces identical errors to champion"},
         )
 
-    # Statistical test: Wilcoxon signed-rank test (non-parametric, robust to outliers)
+    # Wilcoxon signed-rank test (non-parametric paired test)
     # Alternative 'less' tests if cand_errors < champ_errors
     test_method = "Wilcoxon Signed-Rank Test"
     try:
