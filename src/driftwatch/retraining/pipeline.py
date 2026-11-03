@@ -99,9 +99,14 @@ class RetrainingPipeline:
 
         # Load Champion forecaster from disk
         champion_forecaster = XGBoostDemandForecaster()
-        if not Path(champion_version.artifact_uri).exists():
-            raise FileNotFoundError(f"Champion artifact missing at {champion_version.artifact_uri}")
-        champion_forecaster.load_model(champion_version.artifact_uri)
+        artifact_path = Path(champion_version.artifact_uri)
+        if not artifact_path.exists():
+            fallback = Path("artifacts/models") / artifact_path.name
+            if fallback.exists():
+                artifact_path = fallback
+            else:
+                raise FileNotFoundError(f"Champion artifact missing at {champion_version.artifact_uri}")
+        champion_forecaster.load_model(str(artifact_path))
 
         # 3. Register PENDING/RUNNING job in DB
         job_id = f"retrain_{uuid.uuid4().hex[:10]}"

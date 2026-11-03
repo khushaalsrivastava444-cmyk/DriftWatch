@@ -64,11 +64,16 @@ class ModelServingService:
             self.active_version_id = active_version.id
             self.active_model_id = active_version.model_id
             # Load from artifact URI if not already in memory
-            if self.active_forecaster is None and Path(active_version.artifact_uri).exists():
+            art_path = Path(active_version.artifact_uri)
+            if not art_path.exists():
+                fallback = self.models_dir / art_path.name
+                if fallback.exists():
+                    art_path = fallback
+            if self.active_forecaster is None and art_path.exists():
                 forecaster = XGBoostDemandForecaster()
-                forecaster.load_model(active_version.artifact_uri)
+                forecaster.load_model(str(art_path))
                 self.active_forecaster = forecaster
-                logger.info("Loaded active champion model %s from %s", active_version.id, active_version.artifact_uri)
+                logger.info("Loaded active champion model %s from %s", active_version.id, str(art_path))
             return active_version.id
 
         # 2. If no active champion exists, train and register initial Champion (v1)
@@ -289,9 +294,14 @@ class ModelServingService:
 
         self.active_version_id = target.id
         self.active_model_id = target.model_id
-        if Path(target.artifact_uri).exists():
+        art_path = Path(target.artifact_uri)
+        if not art_path.exists():
+            fallback = self.models_dir / art_path.name
+            if fallback.exists():
+                art_path = fallback
+        if art_path.exists():
             forecaster = XGBoostDemandForecaster()
-            forecaster.load_model(target.artifact_uri)
+            forecaster.load_model(str(art_path))
             self.active_forecaster = forecaster
 
         logger.info("Promoted model %s v%d (ID: %s) to active champion", model_id, version, target.id)
@@ -338,9 +348,14 @@ class ModelServingService:
 
         self.active_version_id = prev.id
         self.active_model_id = prev.model_id
-        if Path(prev.artifact_uri).exists():
+        art_path = Path(prev.artifact_uri)
+        if not art_path.exists():
+            fallback = self.models_dir / art_path.name
+            if fallback.exists():
+                art_path = fallback
+        if art_path.exists():
             forecaster = XGBoostDemandForecaster()
-            forecaster.load_model(prev.artifact_uri)
+            forecaster.load_model(str(art_path))
             self.active_forecaster = forecaster
 
         logger.info("Rolled back model %s to champion v%d (ID: %s)", model_id, prev.version, prev.id)

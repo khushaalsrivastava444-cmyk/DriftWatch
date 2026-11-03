@@ -294,9 +294,14 @@ def promote_candidate(
 
     serving_service.active_version_id = target.id
     serving_service.active_model_id = target.model_id
-    if Path(target.artifact_uri).exists():
+    art_path = Path(target.artifact_uri)
+    if not art_path.exists():
+        fallback = Path("artifacts/models") / art_path.name
+        if fallback.exists():
+            art_path = fallback
+    if art_path.exists():
         forecaster = XGBoostDemandForecaster()
-        forecaster.load_model(target.artifact_uri)
+        forecaster.load_model(str(art_path))
         serving_service.active_forecaster = forecaster
 
     return {
@@ -361,9 +366,14 @@ def rollback_champion(
     db.commit()
 
     serving_service.active_version_id = prev.id
-    if Path(prev.artifact_uri).exists():
+    art_path = Path(prev.artifact_uri)
+    if not art_path.exists():
+        fallback = Path("artifacts/models") / art_path.name
+        if fallback.exists():
+            art_path = fallback
+    if art_path.exists():
         forecaster = XGBoostDemandForecaster()
-        forecaster.load_model(prev.artifact_uri)
+        forecaster.load_model(str(art_path))
         serving_service.active_forecaster = forecaster
 
     return {
