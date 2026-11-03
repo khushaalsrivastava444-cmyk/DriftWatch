@@ -1,0 +1,55 @@
+name: DriftWatch Continuous Integration
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-and-verify:
+    name: Lint, Type Check, and End-to-End Test Suite
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Codebase
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install System Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev build-essential
+
+      - name: Install DriftWatch and Dev Dependencies
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          pip install -e ".[dev]"
+
+      - name: Run Ruff Lint Checks
+        run: |
+          ruff check src/ tests/ scripts/
+
+      - name: Run Mypy Type Verification
+        run: |
+          mypy src/driftwatch
+
+      - name: Execute Full Pytest Suite
+        run: |
+          pytest tests/ -v
+
+      - name: Execute Autonomous End-to-End Demo (< 2 min)
+        run: |
+          python scripts/run_demo.py
+
+      - name: Upload Evidently Cross-Check HTML Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidently-reports
+          path: reports/*.html

@@ -1,0 +1,69 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: driftwatch-postgres
+    environment:
+      POSTGRES_DB: driftwatch
+      POSTGRES_USER: driftwatch
+      POSTGRES_PASSWORD: driftwatch_secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U driftwatch -d driftwatch"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: driftwatch-api
+    command: uvicorn driftwatch.api.app:app --host 0.0.0.0 --port 8000
+    environment:
+      DRIFTWATCH_DB_URL: postgresql://driftwatch:driftwatch_secure_password@postgres:5432/driftwatch
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+      DRIFTWATCH_API_KEY: dw_prod_secret_key_2026
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - app_artifacts:/app/artifacts
+
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: driftwatch-dashboard
+    command: streamlit run src/driftwatch/ui/dashboard_app.py --server.port 8501 --server.address 0.0.0.0
+    environment:
+      DRIFTWATCH_DB_URL: postgresql://driftwatch:driftwatch_secure_password@postgres:5432/driftwatch
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    volumes:
+      - app_artifacts:/app/artifacts
+
+  mlflow:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: driftwatch-mlflow
+    command: mlflow server --backend-store-uri postgresql://driftwatch:driftwatch_secure_password@postgres:5432/driftwatch --default-artifact-root /app/artifacts/mlruns --host 0.0.0.0 --port 5000
+    ports:
+      - "5000:5000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - app_artifacts:/app/artifacts
+
+volumes:
+  postgres_data:
+  app_artifacts:

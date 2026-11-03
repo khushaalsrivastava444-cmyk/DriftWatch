@@ -1,0 +1,41 @@
+# Python bytecode & environments
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+
+# Build & packaging
+build/
+dist/
+*.egg-info/
+
+# Testing & quality caches
+.pytest_cache/
+.hypothesis/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Local databases & artifacts
+*.db
+*.sqlite
+*.sqlite3
+driftwatch.db
+mlflow.db
+mlruns/
+artifacts/models/
+artifacts/mlflow.db
+reports/
+
+# IDE & OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Other unrelated workspaces
+Monsoon Cast/
+monsooncast/
