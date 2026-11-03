@@ -4,30 +4,33 @@
 Accepted
 
 ## Context
-A ubiquitous flaw in production ML monitoring systems is alert fatigue caused by conflating input feature distribution shifts with actual model performance decay:
-1. **The Fallacy of Concept Drift Detection from Unlabeled Data**: When true ground-truth labels are delayed (e.g. retail demand receipts, returns, delivery logs), observing $P(X_{\text{curr}}) \neq P(X_{\text{ref}})$ only establishes covariate shift. It cannot confirm that the conditional target relationship $P(Y \mid X)$ has altered.
-2. **Alert Fatigue**: Treating every feature drift breach as a high-severity incident causes operations teams to ignore alarms. In high-dimensional models, benign changes in irrelevant features frequently breach uncorrected hypothesis tests.
+Standard monitoring setups produce alert fatigue because they treat input shifts as model failures:
+1. *Unlabeled data cannot detect concept drift*: If ground truth is delayed (such as retail sales receipts or returns), observing $P(X_{\text{curr}}) \neq P(X_{\text{ref}})$ only tells us the inputs moved. It cannot tell us whether $P(Y \mid X)$ changed.
+2. *Alert fatigue*: Firing high-priority alerts on input drift causes on-call engineers to ignore alerts. In practice, models are often invariant to minor shifts in unimportant features.
 
 ## Decision
-We enforce a strict four-tier **Evidence Classification** across all monitoring evaluations, database records, and user interfaces:
+Classify all telemetry into four evidence tiers:
 
 1. `STATISTICAL_SHIFT`:
-   - Derived exclusively from unlabeled input features ($X$) via univariate tests (PSI, KS, JS, Wasserstein) or multivariate domain classifiers.
-   - **Severity Gate**: Maximum severity is `WARNING`. If the drifted feature possesses $< 2\%$ predictive importance in the active champion model, severity is automatically demoted to `INFO` (Drift-Impact Attribution).
+   - Measured on unlabeled inputs ($X$) using univariate tests (PSI, KS, JS, Wasserstein) or domain classifier AUC.
+   - Max severity is `WARNING`. If the shifted feature has $< 2\%$ predictive importance, demote severity to `INFO`.
 
 2. `PREDICTION_SHIFT`:
-   - Derived exclusively from the model's own output distribution ($\hat{Y}$) without labels.
-   - **Severity Gate**: Maximum severity is `WARNING`.
+   - Measured on model outputs ($\hat{y}$) without labels.
+   - Max severity is `WARNING`.
 
 3. `ESTIMATED_PERFORMANCE`:
-   - Derived from importance-weighted density ratio estimation or windows with inadequate ground-truth label maturity ($< 80\%$ coverage).
-   - **Severity Gate**: Maximum severity is `INFO`. Stamped with explicit stated assumptions (Covariate Shift Invariance) and failure modes (Concept Drift blindness).
+   - Measured via density-ratio importance weighting or on windows with $< 80\%$ label coverage.
+   - Max severity is `INFO`. Stamped with explicit assumptions (covariate shift only; invalid under concept drift).
 
 4. `VERIFIED_PERFORMANCE`:
-   - Derived strictly from matched operational predictions and verified delayed ground-truth labels ($Y$) where label coverage $\ge 80\%$.
-   - **Severity Gate**: Required prerequisite for `CRITICAL` severity alerts. A `CRITICAL` alert requires a statistically significant breach of the stationary block bootstrap 95% confidence interval across consecutive monitoring windows.
+   - Measured on matched predictions and delayed ground truth with $\ge 80\%$ coverage.
+   - Required for `CRITICAL` alerts. A `CRITICAL` alert requires the lower bound of the 95% stationary block bootstrap confidence interval to breach the baseline error threshold.
+
+## Alternatives
+- *Single alert severity with tunable thresholds*: Rejected. Threshold tuning without evidence gating still treats input shifts as outages.
+- *Estimate target values using heuristic labels*: Rejected. Inventing labels introduces unquantified bias.
 
 ## Consequences
-- Zero false `CRITICAL` alerts on unlabeled feature drift.
-- Transparent mathematical provenance for all operational alerts.
-- Operations teams are never misled into treating covariate shifts as confirmed model failure.
+- No `CRITICAL` alerts without ground truth.
+- Covariate shifts raise warnings that prompt pipeline inspection rather than emergency retraining.

@@ -1,47 +1,40 @@
-# ADR 0004: Retraining Governance, Job Locks, and Paired Statistical Hypothesis Testing
+# ADR 0004: Retraining Governance, Job Locks, and Paired Statistical Testing
 
 ## Status
 Accepted
 
 ## Context
-Automated ML retraining pipelines in production present severe operational risks:
-1. **Uncontrolled Retraining Loops**: If retraining triggers automatically upon statistical drift alone, models may be retrained continuously on noisy transient fluctuations, consuming compute and introducing regression risk.
-2. **The "Newer Is Better" Fallacy**: Promoting candidate models solely because their training loss is low or because they were trained on recent data often degrades production performance.
-3. **Race Conditions**: Concurrent retraining jobs triggered by overlapping windows can corrupt artifacts and produce non-deterministic deployments.
+Automating retraining without statistical gates creates real failure modes:
+1. *Drift-induced retraining loops*: If retraining fires on input drift alone, models retrain on transient noise, burning compute and risking regression.
+2. *Assumption that recent models are better*: Models fit on fresh data sometimes overfit recent fluctuations and perform worse on holdouts.
+3. *Concurrent jobs*: Overlapping retraining runs can collide on model artifact paths.
 
 ## Decision
-We enforce three strict governance pillars:
+Enforce four operational gates:
 
-### 1. Trigger Policy Governance & Rejection of Drift-Only Retraining
-- The `DRIFT_ONLY` trigger policy is explicitly rejected by policy evaluation:
-  $$\text{evaluate\_retraining\_trigger}(\text{DRIFT\_ONLY}) \implies \text{should\_retrain} = \text{False}$$
-- Retraining triggers strictly require either:
-  - `SUSTAINED_DEGRADATION`: $k$-of-$n$ (e.g. 2 of 3) verified performance windows breaching the 95% bootstrap CI band.
-  - `MANUAL`: Audited operator trigger with authenticated credentials.
-  - `SCHEDULED`: Calendar maintenance window.
+1. **Reject drift-only retraining**:
+   - `evaluate_retraining_trigger(DRIFT_ONLY)` returns `False`.
+   - Retraining only fires on `SUSTAINED_DEGRADATION` (verified performance breaches across $k$-of-$n$ windows), authenticated `MANUAL` requests, or `SCHEDULED` cadences.
 
-### 2. Atomic Retraining Job Locks & Idempotency
-- Before retraining initiates, the database is queried for active `RUNNING` jobs. If a job is active, subsequent trigger requests are rejected immediately:
-  $$\text{select}(\text{RetrainingJobModel}).\text{where}(\text{status} == \text{"RUNNING"}) \implies \text{RuntimeError}$$
+2. **Atomic job locks**:
+   - Before starting, the pipeline queries the DB for `RUNNING` retraining jobs. If one is found, it raises a `RuntimeError` rather than running concurrently.
 
-### 3. Paired Statistical Hypothesis Comparison vs Active Champion
-- Candidate models are evaluated on an identical, chronologically isolated temporal holdout test partition against the active Champion.
-- We evaluate paired absolute forecast errors:
-  $$e_{\text{champ}, i} = |y_i - \hat{y}_{\text{champ}, i}|, \quad e_{\text{cand}, i} = |y_i - \hat{y}_{\text{cand}, i}|$$
-- We test the non-parametric Wilcoxon Signed-Rank Test with one-sided alternative hypothesis:
-  $$H_0: e_{\text{cand}} \ge e_{\text{champ}} \quad \text{vs} \quad H_1: e_{\text{cand}} < e_{\text{champ}}$$
-- Candidate models are marked `APPROVED` only if:
-  1. $p\text{-value} < 0.05$ (statistically significant error reduction).
-  2. $\text{MAE}_{\text{cand}} < \text{MAE}_{\text{champ}}$.
-  3. Candidate passes all validation rules.
+3. **Paired Wilcoxon signed-rank test against active champion**:
+   - Candidate models are evaluated on an identical temporal holdout split against the active champion.
+   - We pair absolute errors by record: $d_i = |y_i - \hat{y}_i^{\text{champ}}| - |y_i - \hat{y}_i^{\text{cand}}|$.
+   - The candidate is approved only if:
+     - The Wilcoxon test rejects the null hypothesis at $\alpha=0.05$ (statistically significant error reduction).
+     - Candidate MAE is strictly lower than champion MAE.
 
-### 4. Decoupled Promotion & Audited Rollback
-- Registration of an `APPROVED` candidate **never** auto-promotes to active champion:
-  $$\text{ModelVersion}.\text{is\_active\_champion} = \text{False}$$
-- Promotion is a distinct, authenticated action that updates the champion pointer in the database, hot-reloads memory forecasters, and logs a permanent entry in `audit_logs`.
-- Rollback restores the prior stable champion version with an audited transaction.
+4. **Decoupled promotion and rollback**:
+   - An approved candidate is registered with `is_active_champion = False`.
+   - Promotion is a distinct, audited API call that updates the champion pointer in the database, reloads the forecaster in memory, and writes to `audit_logs`.
+   - Rollback re-activates the previous champion with an audit log record.
+
+## Alternatives
+- *Auto-promote whenever candidate validation loss is lower*: Rejected. A small difference on a single validation set can be random noise. The paired Wilcoxon test guards against regression.
+- *Async message queue (Celery/RabbitMQ)*: Deferred. In-process locking is simpler and adequate for current workloads.
 
 ## Consequences
-- No silent model regressions.
-- Transparent mathematical audit trail for all deployments.
-- Guaranteed idempotency and thread-safety during retraining operations.
+- Statistical drift alone never triggers model replacement.
+- Every promotion and rollback has an immutable database audit trail.

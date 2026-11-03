@@ -4,17 +4,20 @@
 Accepted
 
 ## Context
-Evidently released version 0.7.x which refactored import hierarchies:
-- `ColumnMapping` and legacy metrics presets were moved into `evidently.legacy` or simplified in the root namespace `from evidently import Report`.
-- Metric presets are located under `from evidently.presets import DataDriftPreset`.
-- Report execution operates on raw pandas DataFrames: `report.run(reference_data=..., current_data=...)`.
-- HTML export is supported via `report.save_html(path)`.
+Evidently 0.7 refactored its package structure:
+- Root presets now live in `evidently.presets` (e.g. `DataDriftPreset`).
+- Reports run directly on pandas DataFrames: `report.run(reference_data=ref, current_data=curr)`.
+- Legacy `ColumnMapping` is replaced with standard column names.
+- HTML export works via `report.save_html(path)`.
 
 ## Decision
-1. Import `Report` directly from `evidently`: `from evidently import Report`.
-2. Import `DataDriftPreset` from `evidently.presets`: `from evidently.presets import DataDriftPreset`.
-3. Use Evidently strictly for independent cross-check validation and static HTML exports, preserving pure SciPy/NumPy implementations for DriftWatch's internal sub-millisecond production inference path.
+1. Import `Report` directly from `evidently`, and `DataDriftPreset` from `evidently.presets`.
+2. Keep Evidently as an optional cross-check and HTML report generator. The core monitoring loops use native SciPy and NumPy functions.
+
+## Alternatives
+- *Replace native drift engine with Evidently entirely*: Rejected. Evidently runs full suites of tests that take hundreds of milliseconds per batch. Native tests complete in under 1 ms per feature.
+- *Drop Evidently completely*: Rejected. Having an independent tool verify our drift decisions provides an objective sanity check on boundary cases.
 
 ## Consequences
-- Clean execution without legacy deprecation warnings.
-- Full compatibility with Evidently 0.7.23+.
+- Clean imports without deprecation warnings.
+- Fast serving path remains decoupled from Evidently's dependency footprint.

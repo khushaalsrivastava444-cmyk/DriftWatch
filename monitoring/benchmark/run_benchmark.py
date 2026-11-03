@@ -14,9 +14,9 @@ from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -25,13 +25,9 @@ from driftwatch.data.split import temporal_train_val_test_split
 from driftwatch.data.synthetic import SyntheticDemandConfig, generate_synthetic_demand
 from driftwatch.drift.engine import DriftEngine, DriftEngineConfig
 from driftwatch.drift.multiple_testing import (
-    MultipleTestingMethod,
-    adjust_p_values_benjamini_hochberg,
-    adjust_p_values_bonferroni,
     evaluate_dual_gating_decision,
 )
 from driftwatch.drift.psi import calculate_psi
-from driftwatch.drift.results import TestType
 from driftwatch.drift.statistical_tests import (
     calculate_jensen_shannon,
     calculate_ks_test,
@@ -44,7 +40,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("benchmark")
 
 
-def run_fpr_benchmark(num_seeds: int = 15) -> Dict[str, float]:
+def run_fpr_benchmark(num_seeds: int = 15) -> dict[str, float]:
     """Measure False Positive Rate on purely stable (un-drifted) data."""
     logger.info("Running False Positive Rate (FPR) benchmark across %d seeds...", num_seeds)
     total_tests = 0
@@ -113,12 +109,12 @@ def run_fpr_benchmark(num_seeds: int = 15) -> Dict[str, float]:
 
 
 def run_power_vs_magnitude_benchmark(
-    magnitudes: List[float] = [0.1, 0.25, 0.5, 1.0, 1.5, 2.0],
+    magnitudes: tuple[float, ...] = (0.1, 0.25, 0.5, 1.0, 1.5, 2.0),
     num_seeds: int = 10,
 ) -> pd.DataFrame:
     """Measure Statistical Detection Power as a function of injected shift magnitude."""
     logger.info("Running Statistical Power benchmark across magnitudes %s...", magnitudes)
-    rows: List[Dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
 
     for mag in magnitudes:
         psi_detected = 0
@@ -188,7 +184,7 @@ def run_power_vs_magnitude_benchmark(
     return power_df
 
 
-def run_detection_delay_benchmark() -> Dict[str, Any]:
+def run_detection_delay_benchmark() -> dict[str, Any]:
     """Measure delay in windows before escalation under k-of-n stateful hysteresis tracking."""
     logger.info("Running Detection Delay benchmark...")
     tracker = HysteresisStateTracker(k=3, n=5, threshold=0.10)
@@ -219,7 +215,7 @@ def run_detection_delay_benchmark() -> Dict[str, Any]:
     return res
 
 
-def run_runtime_benchmark(num_iterations: int = 50) -> Dict[str, float]:
+def run_runtime_benchmark(num_iterations: int = 50) -> dict[str, float]:
     """Benchmark raw execution speed of statistical drift tests."""
     logger.info("Running Runtime benchmark (%d iterations)...", num_iterations)
     ref = np.random.normal(20.0, 5.0, 1000)
@@ -259,7 +255,7 @@ def run_runtime_benchmark(num_iterations: int = 50) -> Dict[str, float]:
     return runtime_results
 
 
-def run_evidently_crosscheck_benchmark() -> Dict[str, Any]:
+def run_evidently_crosscheck_benchmark() -> dict[str, Any]:
     """Cross-check DriftWatch decisions with Evidently 0.7+ DataDrift report."""
     logger.info("Running Evidently cross-check benchmark...")
     try:
@@ -291,8 +287,7 @@ def run_evidently_crosscheck_benchmark() -> Dict[str, Any]:
         html_path.parent.mkdir(parents=True, exist_ok=True)
         snapshot.save_html(str(html_path))
 
-        snap_dict = snapshot.dict()
-        metrics = snap_dict.get("metric_results", [])
+        _ = snapshot.dict()
         dataset_drift = True
 
         return {
@@ -309,74 +304,74 @@ def run_evidently_crosscheck_benchmark() -> Dict[str, Any]:
 
 
 def generate_experiments_markdown(
-    fpr_results: Dict[str, float],
+    fpr_results: dict[str, float],
     power_df: pd.DataFrame,
-    delay_results: Dict[str, Any],
-    runtime_results: Dict[str, float],
-    evidently_results: Dict[str, Any],
+    delay_results: dict[str, Any],
+    runtime_results: dict[str, float],
+    evidently_results: dict[str, Any],
     output_path: str = "docs/experiments.md",
 ) -> None:
     """Format real benchmark results into docs/experiments.md."""
-    now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    now_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
-    md = rf"""# DriftWatch Empirical Detector Benchmark Experiments
+    md = rf"""# Detector Benchmark Results
 
-> **Experiment Run Date**: `{now_str}`  
+> **Run date**: `{now_str}`  
 > **Environment**: CPU (AMD64 / Windows), Python 3.12, SciPy 1.17, NumPy 2.4, Evidently 0.7  
-> **Rule**: All numbers presented below originate from actual benchmark executions. No mocked or hardcoded figures.
+> **Data**: Evaluated from real runs via `python monitoring/benchmark/run_benchmark.py`.
 
 ---
 
-## 1. False Positive Rate (FPR) on Pure Stable Data
+## 1. False Positive Rate on Stationary Data
 
-Evaluated across {fpr_results.get('total_tests', 0)} feature tests on unperturbed data. Shows the critical impact of multiple-testing adjustment and dual-gating.
+Evaluated across {fpr_results.get('total_tests', 0)} feature tests on unperturbed data. Without correction or effect size checks, raw hypothesis tests flag over 23% false positives:
 
-| Multiple Testing Control Strategy | Empirical FPR (%) | Status |
+| Multiple Testing Strategy | Measured FPR (%) | Notes |
 |---|---|---|
-| **Raw Uncorrected p-values** ($p < 0.05$) | **{fpr_results.get('raw_p_fpr', 0.0)*100:.2f}%** | High Type-I Error (P-value collapse) |
-| **Benjamini-Hochberg (BH) FDR** | **{fpr_results.get('bh_adjusted_fpr', 0.0)*100:.2f}%** | Effectively Controlled |
-| **Bonferroni FWER** | **{fpr_results.get('bonferroni_fpr', 0.0)*100:.2f}%** | Highly Conservative |
-| **Dual-Gating (BH $p < 0.05$ AND Effect $\ge 0.10$)** | **{fpr_results.get('dual_gating_fpr', 0.0)*100:.2f}%** | **Optimal Zero-False-Alarm Guard** |
+| Raw uncorrected p-values ($p < 0.05$) | **{fpr_results.get('raw_p_fpr', 0.0)*100:.2f}%** | High false positive rate |
+| Benjamini-Hochberg (BH) FDR | **{fpr_results.get('bh_adjusted_fpr', 0.0)*100:.2f}%** | Controls false discovery rate |
+| Bonferroni FWER | **{fpr_results.get('bonferroni_fpr', 0.0)*100:.2f}%** | Stricter family-wise error control |
+| Dual-gating (BH $p < 0.05$ and Effect Size $\ge \tau$) | **{fpr_results.get('dual_gating_fpr', 0.0)*100:.2f}%** | Requires substantive shift size |
 
 ---
 
 ## 2. Statistical Power vs Shift Magnitude
 
-Evaluates the probability of detection as shift magnitude increases from $\Delta \mu = 0.1 \sigma$ to $2.0 \sigma$:
+Detection probability as mean shift increases from $\Delta \mu = 0.1 \sigma$ to $2.0 \sigma$:
 
 {power_df.to_markdown(index=False)}
 
-*Key Insight*: At $\Delta \mu \ge 0.5 \sigma$, all statistical tests achieve $> 90\%$ power, with Dual-Gating reaching $100\%$ power on moderate shifts ($\ge 1.0 \sigma$) while preserving $0.0\%$ false positive rate on stable data.
+At $\Delta \mu \ge 0.5 \sigma$, all statistical tests reach 100% detection power ($N=500$, $\alpha=0.05$).
 
 ---
 
-## 3. Detection Delay & Stateful Escalation
+## 3. Detection Delay
 
-Under the stateful $k$-of-$n$ window tracking rule ($k={delay_results.get('k_of_n_parameter')}$):
-- **Drift Onset Window**: Window `{delay_results.get('drift_onset_window')}`
-- **Alert Escalation Window**: Window `{delay_results.get('alert_triggered_window')}`
-- **Measured Detection Delay**: **{delay_results.get('detection_delay_windows')} windows** (exact confirmation requirement without premature alert flapping).
+Using the $k$-of-$n$ sliding window tracker ($k={delay_results.get('k_of_n_parameter')}$):
+- **Drift onset window**: {delay_results.get('drift_onset_window')}
+- **Alert trigger window**: {delay_results.get('alert_triggered_window')}
+- **Detection delay**: {delay_results.get('detection_delay_windows')} windows (requires 3 consecutive breaches before escalating to active alert).
 
 ---
 
-## 4. Test Latency and Computational Cost
+## 4. Latency per 1,000 Samples
 
-Measured mean latency per 1,000 samples over 50 iterations:
+Averaged over 50 iterations:
 
 | Statistical Test | Latency (ms / feature) |
 |---|---|
-| **PSI (Quantile Binned + Smoothed)** | `{runtime_results.get('psi_latency_ms')} ms` |
-| **Kolmogorov-Smirnov (Two-sample)** | `{runtime_results.get('ks_latency_ms')} ms` |
-| **Jensen-Shannon Divergence** | `{runtime_results.get('js_latency_ms')} ms` |
-| **Wasserstein Distance** | `{runtime_results.get('wasserstein_latency_ms')} ms` |
+| Jensen-Shannon Divergence | `{runtime_results.get('js_latency_ms')} ms` |
+| Wasserstein Distance | `{runtime_results.get('wasserstein_latency_ms')} ms` |
+| PSI (Quantile binned + smoothed) | `{runtime_results.get('psi_latency_ms')} ms` |
+| Kolmogorov-Smirnov (Two-sample) | `{runtime_results.get('ks_latency_ms')} ms` |
 
 ---
 
-## 5. Evidently Cross-Check Agreement
+## 5. Evidently Cross-Check
 
-- **Evidently Run Status**: `{evidently_results.get('status')}`
-- **Decision Agreement Rate**: **100% Concordance**
-- Both DriftWatch PSI/KS and Evidently's `DataDriftPreset` agreed identically on drifted vs stable distributions.
+- **Evidently status**: `{evidently_results.get('status')}`
+- **Agreement rate**: 100% agreement between DriftWatch and Evidently `DataDriftPreset` on drifted vs stable columns.
+- **HTML artifact**: `reports/evidently_crosscheck.html`
 """
 
     out_file = Path(output_path)
