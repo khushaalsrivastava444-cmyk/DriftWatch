@@ -61,10 +61,10 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-st.title("🛡️ DriftWatch — System Overview")
+st.title("DriftWatch Overview")
 st.markdown(
-    "Continuous ML monitoring platform for demand forecasting. "
-    "Every alert and degradation signal carries strict **evidence classification**."
+    "Monitoring platform for demand forecasting models. "
+    "Every alert and degradation signal carries an explicit evidence class."
 )
 
 db = get_db_session()
@@ -146,11 +146,11 @@ with e_cols[3]:
 st.divider()
 
 # Active Alerts Panel
-st.subheader("🚨 Active Alerts Requiring Attention")
+st.subheader("Active Alerts")
 active_alerts = query_active_alerts(db)
 
 if not active_alerts:
-    st.info("✅ All systems operational. Zero active alerts detected in database.")
+    st.info("No active alerts in the database.")
 else:
     alert_rows = []
     for a in active_alerts:
@@ -184,17 +184,17 @@ else:
                     engine.resolve_alert(row["ID"], db)
                     st.rerun()
 
-st.sidebar.title("🛡️ DriftWatch Navigation")
+st.sidebar.title("Navigation")
 st.sidebar.markdown(
     """
     **Pages:**
-    1. **Overview** (System Status)
-    2. **Data Drift** (PSI, KS, JS, Wasserstein)
-    3. **Performance** (Delayed Labels & Bootstrap CIs)
-    4. **Model Registry** (Champion / Challenger)
-    5. **Retraining** (Walk-Forward Temporal CV)
-    6. **Alerts** (Incident Management & Audit)
-    7. **Data Quality** (Validation & Quarantine)
+    1. **Overview**
+    2. **Data Drift**
+    3. **Performance**
+    4. **Model Registry**
+    5. **Retraining**
+    6. **Alerts**
+    7. **Data Quality**
     """
 )
-st.sidebar.info("💡 Connected to real SQLite/Postgres database. No mocked data.")
+st.sidebar.caption("Connected to database.")

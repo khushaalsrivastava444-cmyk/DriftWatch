@@ -12,19 +12,19 @@ from driftwatch.ui.db_helper import (
     query_feature_drift_results,
 )
 
-st.set_page_config(page_title="Data Drift — DriftWatch", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Data Drift - DriftWatch", layout="wide")
 
-st.title("📊 Statistical Data Drift Analytics")
+st.title("Data Drift")
 st.markdown(
     "Monitors distribution shifts across input features and model predictions. "
-    "Employs **Benjamini-Hochberg FDR control** and dual-gating rules (significance + effect size)."
+    "Uses Benjamini-Hochberg FDR control and dual-gating rules (significance + effect size)."
 )
 
 db = get_db_session()
 reports = query_drift_reports(db, limit=20)
 
 if not reports:
-    st.warning("⚠️ No drift reports found in database. Run the replay simulator or detector benchmark to generate data.")
+    st.info("No drift reports in the database yet. Run the simulation or benchmark to generate telemetry.")
     st.stop()
 
 # Select Report Window
@@ -76,7 +76,7 @@ with c3:
 st.divider()
 
 # Plotly Visualizations: Bar chart of Statistics
-st.subheader("📈 Feature Drift Statistics vs Thresholds")
+st.subheader("Test Statistics vs Thresholds")
 
 test_types = df["Test"].unique().tolist()
 selected_test = st.radio("Select Statistical Test to Plot:", test_types, horizontal=True)
@@ -111,5 +111,5 @@ if not df_test.empty:
     st.plotly_chart(fig, use_container_width=True)
 
 # Full Results Table
-st.subheader("📋 Auditable Drift Results Table")
+st.subheader("Test Results")
 st.dataframe(df, use_container_width=True)

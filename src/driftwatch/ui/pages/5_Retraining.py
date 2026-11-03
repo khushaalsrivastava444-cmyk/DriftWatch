@@ -11,12 +11,12 @@ from driftwatch.ui.db_helper import (
     query_retraining_jobs,
 )
 
-st.set_page_config(page_title="Retraining — DriftWatch", page_icon="🔄", layout="wide")
+st.set_page_config(page_title="Retraining - DriftWatch", layout="wide")
 
-st.title("🔄 Retraining Pipeline & Model Comparison")
+st.title("Retraining Pipeline")
 st.markdown(
     "Orchestrates model retraining on validated data. Evaluates candidates using "
-    "**walk-forward temporal validation** and paired statistical hypothesis testing (Wilcoxon / paired t-test)."
+    "walk-forward temporal validation and paired statistical testing (Wilcoxon signed-rank test)."
 )
 
 db = get_db_session()
@@ -26,9 +26,9 @@ evaluations = query_model_evaluations(db, limit=30)
 
 c1, c2 = st.columns(2)
 with c1:
-    st.subheader("📋 Retraining Job History")
+    st.subheader("Retraining Jobs")
     if not jobs:
-        st.info("No retraining jobs recorded yet. Triggered automatically on sustained verified degradation.")
+        st.info("No retraining jobs recorded yet.")
     else:
         j_data = []
         for j in jobs:
@@ -43,7 +43,7 @@ with c1:
         st.dataframe(pd.DataFrame(j_data), use_container_width=True)
 
 with c2:
-    st.subheader("⚖️ Champion vs Challenger Statistical Evaluations")
+    st.subheader("Champion vs Challenger Evaluations")
     if not evaluations:
         st.info("No comparative evaluations found.")
     else:

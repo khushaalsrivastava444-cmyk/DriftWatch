@@ -11,12 +11,12 @@ from driftwatch.ui.db_helper import (
     query_performance_reports,
 )
 
-st.set_page_config(page_title="Performance — DriftWatch", page_icon="📉", layout="wide")
+st.set_page_config(page_title="Performance - DriftWatch", layout="wide")
 
-st.title("📉 Ground-Truth Performance Monitoring")
+st.title("Model Performance")
 st.markdown(
     "Monitors forecasting error on delayed ground-truth retail demand. "
-    "Calculates **stationary block bootstrap 95% confidence intervals**. "
+    "Calculates stationary block bootstrap 95% confidence intervals. "
     "Windows with <80% label maturity remain strictly **UNVERIFIED**."
 )
 
@@ -24,7 +24,7 @@ db = get_db_session()
 reports = query_performance_reports(db, limit=50)
 
 if not reports:
-    st.warning("⚠️ No performance reports recorded in database. Ground-truth labels must be matched and evaluated.")
+    st.info("No labels received yet, performance is unverified.")
     st.stop()
 
 # Convert to DataFrame
@@ -75,7 +75,7 @@ if latest["Status"] == "UNVERIFIED":
 st.divider()
 
 # Plotly Rolling MAE with 95% Bootstrap Confidence Interval
-st.subheader("📊 Temporal Error Tracking with 95% Bootstrap Bands")
+st.subheader("Error Tracking with 95% Bootstrap Bands")
 
 df_verified = df.dropna(subset=["MAE", "CI Lower", "CI Upper"])
 
@@ -144,5 +144,5 @@ if not df_verified.empty:
     st.plotly_chart(fig, use_container_width=True)
 
 # Performance Reports Table
-st.subheader("📋 Chronological Window Performance Manifest")
+st.subheader("Performance Windows")
 st.dataframe(df, use_container_width=True)

@@ -10,19 +10,18 @@ import streamlit as st
 from driftwatch.api.service import serving_service
 from driftwatch.ui.db_helper import get_db_session, query_model_registry
 
-st.set_page_config(page_title="Model Registry — DriftWatch", page_icon="📦", layout="wide")
+st.set_page_config(page_title="Model Registry - DriftWatch", layout="wide")
 
-st.title("📦 Model Registry & Governance")
+st.title("Model Registry")
 st.markdown(
-    "Audited repository of demand forecasting model versions. "
-    "Enforces explicit separation between candidate registration and active champion promotion."
+    "Demand forecasting model versions with champion and candidate status."
 )
 
 db = get_db_session()
 registry = query_model_registry(db)
 
 if not registry:
-    st.warning("⚠️ No models registered in database. Initialize or train a forecaster first.")
+    st.info("No models registered in the database yet.")
     st.stop()
 
 for entry in registry:

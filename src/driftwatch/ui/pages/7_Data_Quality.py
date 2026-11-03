@@ -7,12 +7,12 @@ import streamlit as st
 
 from driftwatch.validation.engine import DataValidationEngine, ValidationConfig
 
-st.set_page_config(page_title="Data Quality — DriftWatch", page_icon="🛡️", layout="wide")
+st.set_page_config(page_title="Data Quality - DriftWatch", layout="wide")
 
-st.title("🛡️ Data Quality & Ingestion Validation")
+st.title("Data Quality")
 st.markdown(
-    "Pre-inference data contract enforcement. Validates input schemas, data types, nulls, "
-    "primary key uniqueness, valid value bounds, and Tukey IQR fences before inference."
+    "Pre-inference schema and range checks. Validates types, nulls, "
+    "primary key uniqueness, and numeric bounds before data reaches the model."
 )
 
 c1, c2, c3 = st.columns(3)
@@ -50,15 +50,15 @@ with c3:
 
 st.divider()
 
-st.subheader("🧪 Interactive Validation Engine Test")
-st.markdown("Test the validation engine directly with custom payload or sample rows:")
+st.subheader("Validation Test")
+st.markdown("Test the validation engine with sample rows:")
 
 sample_input = {
     "store_id": ["CA_1", "CA_1", "CA_2"],
     "item_id": ["FOODS_1", "FOODS_1", "HOBBIES_1"],
-    "date": ["2026-01-01", "2026-01-01", "2026-01-02"],  # Duplicate row 1 & 2!
-    "sales": [10.0, -5.0, 25.0],  # Negative sales in row 1!
-    "sell_price": [2.50, 0.00, 12.00],  # Zero price in row 1!
+    "date": ["2026-01-01", "2026-01-01", "2026-01-02"],  # Duplicate key in rows 1 and 2
+    "sales": [10.0, -5.0, 25.0],  # Negative sales in row 2
+    "sell_price": [2.50, 0.00, 12.00],  # Zero price in row 2
 }
 
 df_sample = pd.DataFrame(sample_input)

@@ -15,12 +15,12 @@ from driftwatch.ui.db_helper import (
     render_status_badge,
 )
 
-st.set_page_config(page_title="Alerts — DriftWatch", page_icon="🚨", layout="wide")
+st.set_page_config(page_title="Alerts - DriftWatch", layout="wide")
 
-st.title("🚨 Alert & Incident Management")
+st.title("Alerts")
 st.markdown(
     "Tiered alerts categorized by severity (`INFO`, `WARNING`, `CRITICAL`) "
-    "and certified with an **evidence classification**."
+    "with evidence classification."
 )
 
 db = get_db_session()
@@ -33,7 +33,7 @@ with f_col2:
     sel_status = st.selectbox("Filter by Status:", ["ALL", "ACTIVE", "ACKNOWLEDGED", "RESOLVED"])
 with f_col3:
     st.write("")  # spacing
-    if st.button("🔄 Refresh Alerts"):
+    if st.button("Refresh Alerts"):
         st.rerun()
 
 alerts = query_all_alerts(db, severity=sel_severity, status=sel_status)
